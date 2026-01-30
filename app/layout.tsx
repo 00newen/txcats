@@ -13,7 +13,6 @@ import { Providers } from '@/src/components/providers/Providers';
 import { Toaster } from '@/components/ui/toaster';
 import '@/styles/globals.css';
 import { ThemeToggle } from '@/components/core/ThemeToggle';
-import { TopBar } from '@/components/core/TopBar';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
