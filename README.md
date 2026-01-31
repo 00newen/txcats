@@ -19,7 +19,7 @@ A Next.js + TypeScript application for managing and categorizing financial trans
 - **Tailwind CSS** for styling
 - **shadcn/ui** for UI components
 - **TanStack Query** for data fetching
-- **Dexie** for IndexedDB storage
+- **Drizzle** for connecting with DB
 - **Zod** for schema validation
 - **Recharts** for data visualization
 - **Lucide React** for icons
