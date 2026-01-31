@@ -10,7 +10,9 @@ export default function DashboardPage() {
       />
       <Card>
         <CardContent className="pt-6">
-          <p className="text-muted-foreground">Coming soon</p>
+          <p className="text-muted-foreground">
+            Welcome to your financial command center. Gain immediate insights into your financial health with a comprehensive overview of your spending, income, and budget status. Visualize trends over time and stay on top of your financial goals with intuitive charts and summaries.
+          </p>
         </CardContent>
       </Card>
     </>
