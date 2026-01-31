@@ -10,7 +10,9 @@ export default function TransactionsPage() {
       />
       <Card>
         <CardContent className="pt-6">
-          <p className="text-muted-foreground">Coming soon</p>
+          <p className="text-muted-foreground">
+            Full visibility into your financial activity. Browse, search, and filter through your complete transaction history with ease. Whether you're auditing past expenses or looking for specific payments, this powerful table view gives you total control over your data.
+          </p>
         </CardContent>
       </Card>
     </>

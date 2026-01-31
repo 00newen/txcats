@@ -10,7 +10,9 @@ export default function LockPage() {
       />
       <Card>
         <CardContent className="pt-6">
-          <p className="text-muted-foreground">Coming soon</p>
+          <p className="text-muted-foreground">
+            Advanced security for your peace of mind. Manage your encryption keys and privacy settings to ensure your sensitive financial data remains strictly confidential. Control access and protect your information with industry-standard security protocols.
+          </p>
         </CardContent>
       </Card>
     </>

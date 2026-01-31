@@ -10,7 +10,9 @@ export default function CategorizePage() {
       />
       <Card>
         <CardContent className="pt-6">
-          <p className="text-muted-foreground">Coming soon</p>
+          <p className="text-muted-foreground">
+            Rapidly organize your pending transactions. This dedicated workspace focuses on uncategorized entries, allowing you to quickly assign them to the right buckets. Keep your data clean and actionable by clearing your inbox of new expenses.
+          </p>
         </CardContent>
       </Card>
     </>

@@ -10,7 +10,9 @@ export default function PatternsPage() {
       />
       <Card>
         <CardContent className="pt-6">
-          <p className="text-muted-foreground">Coming soon</p>
+          <p className="text-muted-foreground">
+            Automate your workflow with smart rules. Review and refine the intelligent patterns that the system uses to automatically categorize your transactions. By teaching the app your preferences, you save time and ensure consistent reporting across your entire financial history.
+          </p>
         </CardContent>
       </Card>
     </>
