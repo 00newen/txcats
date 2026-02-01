@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
 import { UploadArea } from '@/src/features/upload/components/UploadArea';
 import { TransactionPreview } from '@/src/features/upload/components/TransactionPreview';
-import { ParseResult, TransactionRow } from '@/src/features/upload/types';
+import { ColumnMapping } from '@/src/features/upload/components/ColumnMapping';
+import { ParseResult, TransactionRow, CsvMapping } from '@/src/features/upload/types';
+import { mapRows } from '@/src/features/upload/utils/parser';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useVault } from '@/src/components/auth/VaultProvider';
@@ -12,22 +14,47 @@ import { encryptData } from '@/src/crypto/encryption';
 import { saveEncryptedTransactions } from '@/src/server/actions/vaultItems';
 
 export default function UploadPage() {
+  // State for flow control
+  const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
+
+  // Data State
+  const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parsedData, setParsedData] = useState<TransactionRow[] | null>(null);
+
   const { dek } = useVault();
   const { toast } = useToast();
   const [isImporting, setIsImporting] = useState(false);
 
   const handleParseComplete = (result: ParseResult, file: File) => {
-    if (result.data.length === 0) {
+    if (result.rawData.length === 0) {
       toast({ title: "No data found", description: "The CSV file appears to be empty.", variant: "destructive" });
       return;
     }
-    setParsedData(result.data);
-    toast({ title: "File Parsed", description: `Ready to import ${result.data.length} transactions.` });
+    setParseResult(result);
+    // Go to mapping step
+    setStep('mapping');
+    toast({ title: "File Parsed", description: "Please verify column mapping." });
+  };
+
+  const handleMappingConfirm = (mapping: CsvMapping) => {
+    if (!parseResult) return;
+
+    // Apply mapping to raw data
+    const mapped = mapRows(parseResult.rawData, mapping);
+    setParsedData(mapped);
+    setStep('preview');
+  };
+
+  const handleMappingCancel = () => {
+    setParseResult(null);
+    setParsedData(null);
+    setStep('upload');
   };
 
   const handleReset = () => {
+    setParseResult(null);
     setParsedData(null);
+    setStep('upload');
   };
 
   const handleImport = async () => {
@@ -49,11 +76,12 @@ export default function UploadPage() {
         // Generate Deterministic ID
         // Fingerprint: date + amount + description (normalized) + account (if exists) + counterparty
         const fingerprint = [
-          row.date,
+          row.bookingDate,
           row.amount,
           row.description.trim().toLowerCase(),
-          row.account || '',
-          row.counterpartyAccount || ''
+          row.accountId || '',
+          row.counterparty || '',
+          row.bankTxId || ''
         ].join('|');
 
         const msgBuffer = new TextEncoder().encode(fingerprint);
@@ -86,7 +114,7 @@ export default function UploadPage() {
           description: `Saved ${response.count} transactions to your vault. Duplicates were ignored.`,
           variant: "default"
         });
-        setParsedData(null); // Reset UI
+        handleReset();
       }
     } catch (e) {
       console.error(e);
@@ -106,9 +134,20 @@ export default function UploadPage() {
           </p>
         </div>
 
-        {!parsedData ? (
+        {step === 'upload' && (
           <UploadArea onParseComplete={handleParseComplete} />
-        ) : (
+        )}
+
+        {step === 'mapping' && parseResult && (
+          <ColumnMapping
+            headers={parseResult.rawHeaders}
+            initialMapping={parseResult.mapping}
+            onConfirm={handleMappingConfirm}
+            onCancel={handleMappingCancel}
+          />
+        )}
+
+        {step === 'preview' && parsedData && (
           <TransactionPreview
             data={parsedData}
             onReset={handleReset}
@@ -117,17 +156,17 @@ export default function UploadPage() {
         )}
 
         {/* Help / Instructions Section */}
-        {!parsedData && (
+        {step === 'upload' && (
           <Card>
             <CardHeader>
               <CardTitle>Supported Formats</CardTitle>
-              <CardDescription>We try to auto-detect columns, but standard formats work best.</CardDescription>
+              <CardDescription>We support multi-bank CSV import using our smart mapper.</CardDescription>
             </CardHeader>
             <CardContent>
               <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                <li>Date (e.g., "YYYY-MM-DD", "MM/DD/YYYY")</li>
-                <li>Amount (positive for income, negative for expense, or split columns)</li>
-                <li>Description (Payee, Merchant, Memo)</li>
+                <li>Automatic column detection</li>
+                <li>Manual mapping verification</li>
+                <li>Deduplication on re-import</li>
               </ul>
             </CardContent>
           </Card>

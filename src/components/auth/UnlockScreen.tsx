@@ -73,11 +73,49 @@ export function UnlockScreen({ userMeta, onUnlock }: UnlockScreenProps) {
                         />
                     </div>
                 </CardContent>
-                <CardFooter>
+                <CardFooter className="flex flex-col gap-4">
                     <Button type="submit" className="w-full" disabled={isLoading}>
                         {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Unlock
                     </Button>
+
+                    <div className="w-full pt-4 border-t">
+                        <p className="text-xs text-muted-foreground text-center mb-2 font-mono">DEV OPTIONS</p>
+                        <div className="flex gap-2">
+                            <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                className="w-1/2 text-xs"
+                                onClick={async () => {
+                                    if (confirm("Reset TRANSACTIONS only? This cannot be undone.")) {
+                                        const { devResetTransactions } = await import('@/src/server/actions/dev');
+                                        await devResetTransactions();
+                                        toast({ title: "Transactions Reset", description: "All transaction data wiped." });
+                                        window.location.reload();
+                                    }
+                                }}
+                            >
+                                Reset Txs
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                className="w-1/2 text-xs"
+                                onClick={async () => {
+                                    if (confirm("Reset FULL ACCOUNT? This deletes keys, vault, and data. You will need to start over.")) {
+                                        const { devResetFullAccount } = await import('@/src/server/actions/dev');
+                                        await devResetFullAccount();
+                                        toast({ title: "Account Reset", description: "Vault wiped. Refreshing..." });
+                                        window.location.reload();
+                                    }
+                                }}
+                            >
+                                Reset All
+                            </Button>
+                        </div>
+                    </div>
                 </CardFooter>
             </form>
         </Card>

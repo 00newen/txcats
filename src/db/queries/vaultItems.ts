@@ -1,6 +1,6 @@
 import { db } from '..';
 import { vaultItems } from '../schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { VaultItem, InsertVaultItem } from '../../types/database';
 
 /**
@@ -53,21 +53,31 @@ export async function createVaultItemsBulk(
     ciphertextBase64: string;
     ivBase64: string;
     aadBase64: string;
-  }[]
+  }[],
+  upsertMode: boolean = false
 ): Promise<VaultItem[]> {
   if (items.length === 0) return [];
   
-  const inserted = await db.insert(vaultItems)
-    .values(items as any) // Type assertion might be needed if uniqueId is optional in schema insert types but we know it's there
-    .onConflictDoNothing({ 
-        // We assume a constraint exists on (vaultId, resourceType, uniqueId) or just uniqueId if that's global
-        // Drizzle needs the constraint name or target columns.
-        // Let's rely on the database constraint we are about to add/verify.
-        target: [vaultItems.vaultId, vaultItems.uniqueId] 
-    })
-    .returning();
-    
-  return inserted;
+  const query = db.insert(vaultItems).values(items as any);
+
+  if (upsertMode) {
+      // UPdate on conflict
+      const ids = items.map(i => i.uniqueId).filter(Boolean);
+      return await query.onConflictDoUpdate({
+          target: [vaultItems.vaultId, vaultItems.resourceType, vaultItems.uniqueId], // Must match unique index columns
+          set: {
+              ciphertextBase64: sql`excluded.ciphertext_base64`,
+              ivBase64: sql`excluded.iv_base64`,
+              aadBase64: sql`excluded.aad_base64`,
+              updatedAt: new Date()
+          }
+      }).returning();
+  } else {
+      // Default: Ignore duplicates (for safe imports)
+      return await query.onConflictDoNothing({ 
+        target: [vaultItems.vaultId, vaultItems.resourceType, vaultItems.uniqueId] 
+      }).returning();
+  }
 }
 
 /**

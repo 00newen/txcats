@@ -85,17 +85,17 @@ export function TransactionPreview({ data, onReset, onConfirm }: TransactionPrev
                                 {previewData.map((row, i) => (
                                     <TableRow key={i}>
                                         <TableCell className="font-medium">
-                                            {row.date ? row.date : <span className="text-red-400">Missing</span>}
+                                            {row.bookingDate ? row.bookingDate : <span className="text-red-400">Missing</span>}
                                         </TableCell>
                                         <TableCell>{row.description}</TableCell>
                                         <TableCell className={parseFloat(row.amount.replace(/[^0-9.-]/g, "")) < 0 ? 'text-red-500' : 'text-green-600'}>
                                             {row.amount}
                                         </TableCell>
                                         <TableCell>
-                                            {row.account ? <Badge variant="outline">{row.account}</Badge> : '-'}
+                                            {row.accountId ? <Badge variant="outline">{row.accountId}</Badge> : '-'}
                                         </TableCell>
                                         <TableCell>
-                                            {row.counterpartyAccount ? <span className="text-xs font-mono">{row.counterpartyAccount}</span> : <span className="text-muted-foreground text-xs">-</span>}
+                                            {row.counterparty ? <span className="text-xs font-mono">{row.counterparty}</span> : <span className="text-muted-foreground text-xs">-</span>}
                                         </TableCell>
                                     </TableRow>
                                 ))}

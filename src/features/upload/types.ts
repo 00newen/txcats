@@ -1,17 +1,41 @@
 export type TransactionRow = {
-  date: string;
+  // Required Canonical Fields
+  bookingDate: string; // ISO Date "YYYY-MM-DD"
+  amount: string;      // Normalized decimal string
+  description: string;
+
+  // Recommended/Optional
+  accountId?: string;
+  valueDate?: string;
+  counterparty?: string;
+  merchantOrName?: string;
+  currency?: string;     // ISO 3-letter code, default config if missing
+  bankTxId?: string;
+
+  // Categorization
+  categoryId?: string; 
+
+  // Internal / Original
+  rawRow: Record<string, string>;
+};
+
+export type CsvMapping = {
+  bookingDate: string;
   amount: string;
   description: string;
-  // Account identifier if present in CSV (User's account)
-  account?: string;
-  // External account (Counterparty/Destination/Source)
-  counterpartyAccount?: string;
-  // Original raw data for reference
-  raw: Record<string, string>;
+  accountId?: string; // Optional columns can be unmapped (undefined)
+  valueDate?: string;
+  counterparty?: string;
+  merchantOrName?: string;
+  currency?: string;
+  bankTxId?: string;
 };
 
 export type ParseResult = {
-  data: TransactionRow[];
+  data: TransactionRow[]; // Heuristically mapped data
+  mapping: CsvMapping;    // The mapping used to generate 'data'
+  rawHeaders: string[];   // All headers found in CSV
+  rawData: Record<string, string>[]; // Raw parsed rows
   errors: string[];
   meta: {
     fields: string[];

@@ -275,4 +275,50 @@ TxCats must prevent storing duplicate bank transactions, even when the same CSV 
 - Encryption randomness (unique IVs) does not affect deduplication, since uniqueness is based on deterministic IDs.
 - This approach scales cleanly and remains compatible with future vault sharing without requiring re-encryption.
 
+---
+
+## 🧾 CSV Import: Multi-Bank Support
+
+TxCats must support CSV exports from different banks without hardcoding a single schema.
+
+### Canonical Transaction Fields
+All imported CSV rows must be mapped into a canonical transaction shape:
+- bookingDate (required)
+- amount (required)
+- description (required)
+- accountId (recommended)
+- valueDate (optional)
+- counterparty (optional)
+- merchantOrName (optional)
+- currency (optional; default if missing)
+- bankTxId (optional)
+- rawRow (optional; full original row stored encrypted)
+
+### Mapping UI
+The Upload flow must include a mapping step that:
+- lists detected CSV headers
+- proposes an automatic mapping using heuristics
+- allows the user to manually map required/optional fields
+- shows a preview of the first N mapped rows
+
+### Import Profiles
+Users can save an "Import Profile" (encrypted) containing:
+- header → canonical field mappings
+- parsing rules (delimiter, decimal separator, date format)
+- optional bank label
+Profiles are auto-selected when a CSV matches the same normalized header signature.
+
+### Parsing & Normalization
+The importer must handle common bank variations:
+- delimiter differences (comma/semicolon/tab)
+- date format differences
+- decimal separators (comma vs dot)
+- debit/credit representation differences
+All normalization happens client-side before encryption.
+
+### Dedup Compatibility
+Deterministic transaction IDs must be generated from canonical fields (post-mapping),
+so re-importing the same file or importing from another device does not create duplicates.
+
+---
 

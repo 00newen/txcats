@@ -2,11 +2,10 @@
 
 import { useCallback, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { UploadCloud, FileText, X } from 'lucide-react';
-import { parseCSV } from '@/src/features/upload/utils/parser';
+import { UploadCloud } from 'lucide-react';
 import { ParseResult } from '@/src/features/upload/types';
 import { useToast } from '@/hooks/use-toast';
+import { parseCsv } from '../utils/parser';
 
 interface UploadAreaProps {
     onParseComplete: (result: ParseResult, file: File) => void;
@@ -25,7 +24,7 @@ export function UploadArea({ onParseComplete }: UploadAreaProps) {
 
         setIsParsing(true);
         try {
-            const result = await parseCSV(file);
+            const result = await parseCsv(file);
             if (result.errors.length > 0) {
                 toast({
                     title: "Warning: Possible parsing issues",
