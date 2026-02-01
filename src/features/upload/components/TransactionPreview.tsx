@@ -1,0 +1,67 @@
+'use client';
+
+import { TransactionRow } from '@/src/features/upload/types';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { format } from 'date-fns';
+
+interface TransactionPreviewProps {
+    data: TransactionRow[];
+    onReset: () => void;
+    onConfirm: () => void; // Will handle the actual import later
+}
+
+export function TransactionPreview({ data, onReset, onConfirm }: TransactionPreviewProps) {
+    // Show only first 50 rows for preview performance
+    const previewData = data.slice(0, 50);
+
+    return (
+        <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                    <CardTitle>Preview Transactions</CardTitle>
+                    <CardDescription>Found {data.length} transactions. Showing the first 50.</CardDescription>
+                </div>
+                <div className="space-x-2">
+                    <button onClick={onReset} className="text-sm font-medium text-muted-foreground hover:text-foreground">
+                        Cancel
+                    </button>
+                    <button onClick={onConfirm} className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium text-sm">
+                        Import {data.length} Transactions
+                    </button>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <div className="rounded-md border">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Description</TableHead>
+                                <TableHead>Amount</TableHead>
+                                <TableHead>Account</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {previewData.map((row, i) => (
+                                <TableRow key={i}>
+                                    <TableCell className="font-medium">
+                                        {row.date ? row.date : <span className="text-red-400">Missing</span>}
+                                    </TableCell>
+                                    <TableCell>{row.description}</TableCell>
+                                    <TableCell className={parseFloat(row.amount) < 0 ? 'text-red-500' : 'text-green-600'}>
+                                        {row.amount}
+                                    </TableCell>
+                                    <TableCell>
+                                        {row.account ? <Badge variant="outline">{row.account}</Badge> : '-'}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}

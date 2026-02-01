@@ -10,6 +10,8 @@ import {
 import { Geist, Geist_Mono } from 'next/font/google'
 import { ThemeProvider } from '@/lib/providers/ThemeProvider';
 import { Providers } from '@/src/components/providers/Providers';
+import { VaultProvider } from '@/src/components/auth/VaultProvider';
+import { VaultStatusBanner } from '@/src/components/auth/VaultStatusBanner';
 import { Toaster } from '@/components/ui/toaster';
 import '@/styles/globals.css';
 import { ThemeToggle } from '@/components/core/ThemeToggle';
@@ -49,7 +51,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <UserButton />
               </SignedIn>
             </header>
-            {children}
+            <Providers>
+              <VaultProvider>
+                <VaultStatusBanner />
+                {children}
+              </VaultProvider>
+            </Providers>
             <Toaster />
           </ThemeProvider>
         </body>
