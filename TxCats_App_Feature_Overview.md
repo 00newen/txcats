@@ -322,3 +322,83 @@ so re-importing the same file or importing from another device does not create d
 
 ---
 
+## 🏷️ Default Categories (Vault Initialization)
+
+TxCats must initialize a new vault with a small, sensible set of **default categories** to reduce friction during first-time CSV imports and enable meaningful analytics immediately.
+
+### Creation Timing
+- Default categories are created **once**, immediately after vault initialization.
+- Default categories must **not** be recreated automatically if the user later deletes or modifies them.
+
+### Category Properties
+Each category (default or user-created) has the following properties:
+- `id` (deterministic, client-generated)
+- `name`
+- `color` (hex string)
+- `icon` (Lucide icon name)
+- `parentId` (nullable)
+- `isDefault` (boolean)
+
+### Behavior Rules
+- Default categories:
+  - must behave exactly like user-created categories
+  - can be renamed
+  - can be reparented
+  - can be deleted (after reassigning child categories and transactions)
+- No special logic may rely on a category being default, except for initial creation.
+
+---
+
+## Default Category Set (Level 1)
+
+The following **top-level categories** must be created for every new vault.
+
+| Name              | Icon               | Color   |
+|-------------------|--------------------|---------|
+| Housing           | home               | #2563EB |
+| Utilities         | plug               | #0EA5E9 |
+| Food & Dining     | utensils           | #16A34A |
+| Transportation    | car                | #F97316 |
+| Health            | heart-pulse        | #DC2626 |
+| Personal          | user               | #9333EA |
+| Entertainment     | film               | #DB2777 |
+| Shopping          | shopping-bag       | #F59E0B |
+| Subscriptions     | repeat             | #64748B |
+| Travel            | plane              | #0284C7 |
+| Income            | wallet             | #15803D |
+| Transfers         | arrow-left-right   | #475569 |
+| Other             | layers             | #6B7280 |
+
+### Notes
+- These categories are **top-level only** (no default children).
+- Users are expected to customize, delete, or extend this structure over time.
+- Category depth is capped at **3 levels**, including defaults.
+
+---
+
+## Deterministic IDs for Default Categories
+
+- Default categories must use **deterministic IDs** to prevent duplication.
+- The ID must be derived from:
+  - `vaultId`
+  - category name (normalized)
+- This ensures:
+  - idempotent vault initialization
+  - safe retries
+  - compatibility with future migrations
+
+---
+
+## Analytics Behavior
+
+- Parent categories must include all child category totals in analytics.
+- Default categories must participate in analytics exactly like user-created categories.
+- The `Transfers` category is optional for analytics display but must exist for user clarity.
+
+---
+
+## Design Rationale
+
+- Default categories provide immediate structure without enforcing rigid accounting rules.
+- The category system remains fully user-controlled.
+- Defaults are intended as **starting points**, not constraints.

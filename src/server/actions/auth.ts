@@ -10,7 +10,18 @@ export async function checkUserSetup() {
   if (!userId) return { isSetup: false, userId: null };
 
   const meta = await getUserMeta(userId);
-  return { isSetup: !!meta, userId, meta };
+  
+  // Also fetch primary vault if setup
+  let vaultId = null;
+  if (meta) {
+    const { getVaultsByUserId } = await import('@/src/db/queries/vaults');
+    const userVaults = await getVaultsByUserId(userId);
+    if (userVaults.length > 0) {
+      vaultId = userVaults[0].id;
+    }
+  }
+
+  return { isSetup: !!meta, userId, meta, vaultId };
 }
 
 export async function completeSetup(payload: {
@@ -30,8 +41,8 @@ export async function completeSetup(payload: {
   );
 
   // 2. Create Default Vault
-  await createVault(userId, 'Personal Vault');
+  const vault = await createVault(userId, 'Personal Vault');
 
   revalidatePath('/');
-  return { success: true };
+  return { success: true, vaultId: vault.id };
 }

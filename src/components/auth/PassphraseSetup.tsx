@@ -33,12 +33,36 @@ export function PassphraseSetup({ onComplete }: { onComplete: () => Promise<void
 
         try {
             // 1. Client-side crypto (CPU intensive)
-            const payload = await preparePassphraseSetup(passphrase);
+            const { salt, wrappedDEK, verificationBlob, dek } = await preparePassphraseSetup(passphrase);
 
-            // 2. Server-side storage
-            await completeSetup(payload);
+            // 2. Server-side storage (Create meta and vault)
+            const response = await completeSetup({ salt, wrappedDEK, verificationBlob });
 
-            toast({ title: "Setup Complete", description: "Your vault is ready." });
+            if (response.success && response.vaultId) {
+                // 3. Initialize Default Categories
+                const { prepareDefaultCategories } = await import('@/src/features/categories/utils/defaults');
+                const { encryptData } = await import('@/src/crypto/encryption');
+                const { saveEncryptedItems } = await import('@/src/server/actions/vaultItems');
+
+                const defaultCategories = await prepareDefaultCategories(response.vaultId);
+                const encryptedPayloads = await Promise.all(
+                    defaultCategories.map(async (cat) => {
+                        const aad = new TextEncoder().encode('category');
+                        const { ciphertextBase64, ivBase64 } = await encryptData(cat, dek, aad);
+                        const aadBase64 = btoa(String.fromCharCode(...aad));
+                        return {
+                            uniqueId: cat.id,
+                            ciphertextBase64,
+                            ivBase64,
+                            aadBase64
+                        };
+                    })
+                );
+
+                await saveEncryptedItems('category', encryptedPayloads);
+            }
+
+            toast({ title: "Setup Complete", description: "Your vault is ready with default categories." });
 
             // Call the callback provided by VaultProvider to update internal state
             await onComplete();

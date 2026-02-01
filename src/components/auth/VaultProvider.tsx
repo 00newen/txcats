@@ -13,6 +13,7 @@ interface VaultContextType {
     isUnlocked: boolean;
     isSetup: boolean;
     meta: UserMeta | null;
+    vaultId: string | null;
     lock: () => void;
     unlock: (key: CryptoKey) => void;
 }
@@ -22,6 +23,7 @@ const VaultContext = createContext<VaultContextType>({
     isUnlocked: false,
     isSetup: false,
     meta: null,
+    vaultId: null,
     lock: () => { },
     unlock: () => { },
 });
@@ -34,6 +36,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const { user, isLoaded: isUserLoaded } = useUser();
     const [isSetupChecked, setIsSetupChecked] = useState(false);
     const [userMeta, setUserMeta] = useState<UserMeta | null>(null);
+    const [vaultId, setVaultId] = useState<string | null>(null);
     const [dek, setDek] = useState<CryptoKey | null>(null);
 
     // Check setup status when user loads
@@ -54,9 +57,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
                 // Let's modify the server action first to return the META if found.
                 if (result.meta) {
                     setUserMeta(result.meta as unknown as UserMeta);
+                    setVaultId(result.vaultId || null);
                 } else {
                     // Explicitly set null if not found to handle logout/switch cases
                     setUserMeta(null);
+                    setVaultId(null);
                 }
             } catch (e) {
                 console.error("Failed to check setup", e);
@@ -82,9 +87,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             const result = await checkUserSetup();
             if (result.meta) {
                 setUserMeta(result.meta as unknown as UserMeta);
-                // Auto-unlock logic could go here if we returned the keys from setup, 
-                // but for security usually better to ask for login again or structure flow differently.
-                // For now, just updating state is enough to move from "Setup" to "Locked" state.
+                setVaultId(result.vaultId || null);
             }
         } catch (e) {
             console.error("Failed to refresh setup state", e);
@@ -110,7 +113,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             lock,
             unlock: handleUnlock,
             isSetup: !!userMeta,
-            meta: userMeta
+            meta: userMeta,
+            vaultId
         }}>
             {children}
         </VaultContext.Provider>

@@ -50,7 +50,8 @@ export async function preparePassphraseSetup(passphrase: string) {
   return {
     salt,
     wrappedDEK,
-    verificationBlob
+    verificationBlob,
+    dek // Return the derived DEK for initial setup items
   };
 }
 

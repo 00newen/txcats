@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CategoryItem, DEFAULT_CATEGORIES } from '../types';
+import { CategoryItem } from '../types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,13 +19,13 @@ interface CategoryManagerProps {
 }
 
 export function CategoryManager({ categories, onRefresh }: CategoryManagerProps) {
-    const { dek } = useVault();
+    const { dek, vaultId } = useVault();
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // New Category State
     const [newName, setNewName] = useState('');
-    const [newType, setNewType] = useState<'income' | 'expense'>('expense');
+    const [newType, setNewType] = useState<CategoryItem['type']>('expense');
 
     const handleAdd = async () => {
         if (!dek || !newName.trim()) return;
@@ -76,14 +76,16 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
     };
 
     const handleSeedDefaults = async () => {
-        if (!dek) return;
-        if (!confirm("Add default categories (Rent, Groceries, etc)?")) return;
+        if (!dek || !vaultId) return;
+        if (!confirm("Add default categories (Housing, Utilities, etc)?")) return;
 
         setIsSubmitting(true);
         try {
+            const { prepareDefaultCategories } = await import('../utils/defaults');
+            const defaultCategories = await prepareDefaultCategories(vaultId);
+
             const payloads = [];
-            for (const def of DEFAULT_CATEGORIES) {
-                const item: CategoryItem = { ...def, id: crypto.randomUUID() };
+            for (const item of defaultCategories) {
                 // Encrypt
                 const aad = new TextEncoder().encode('category');
                 const { ciphertextBase64, ivBase64 } = await encryptData(item, dek, aad);
@@ -142,6 +144,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                         >
                             <option value="expense">Expense</option>
                             <option value="income">Income</option>
+                            <option value="other">Other</option>
                         </select>
                     </div>
                     <Button onClick={handleAdd} disabled={isSubmitting || !newName}>
