@@ -43,6 +43,34 @@ export async function createVaultItem(
 }
 
 /**
+ * Create multiple encrypted items in bulk
+ */
+export async function createVaultItemsBulk(
+  items: {
+    vaultId: string;
+    uniqueId?: string;
+    resourceType: string;
+    ciphertextBase64: string;
+    ivBase64: string;
+    aadBase64: string;
+  }[]
+): Promise<VaultItem[]> {
+  if (items.length === 0) return [];
+  
+  const inserted = await db.insert(vaultItems)
+    .values(items as any) // Type assertion might be needed if uniqueId is optional in schema insert types but we know it's there
+    .onConflictDoNothing({ 
+        // We assume a constraint exists on (vaultId, resourceType, uniqueId) or just uniqueId if that's global
+        // Drizzle needs the constraint name or target columns.
+        // Let's rely on the database constraint we are about to add/verify.
+        target: [vaultItems.vaultId, vaultItems.uniqueId] 
+    })
+    .returning();
+    
+  return inserted;
+}
+
+/**
  * Update an item (optimistic locking via version)
  * Returns undefined if update failed (likely version mismatch or deleted)
  */

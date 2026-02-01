@@ -50,6 +50,8 @@ export const vaultItems = pgTable('vault_items', {
   vaultId: uuid('vault_id').references(() => vaults.id, { onDelete: 'cascade' }).notNull(),
   // 'transaction', 'category', 'pattern', 'account'
   resourceType: text('resource_type').notNull(),
+  // Deterministic ID for deduplication (only for transactions usually)
+  uniqueId: text('unique_id'),
   // Encrypted JSON payload
   ciphertextBase64: text('ciphertext_base64').notNull(),
   // Initialization vector for AES-GCM
@@ -66,6 +68,8 @@ export const vaultItems = pgTable('vault_items', {
   index('vault_items_vault_id_idx').on(table.vaultId),
   index('vault_items_resource_type_idx').on(table.resourceType),
   index('vault_items_deleted_at_idx').on(table.deletedAt),
+  // Deduplication constraint: uniqueId must be unique within a vault for a specific resource type
+  uniqueIndex('vault_items_dedup_idx').on(table.vaultId, table.resourceType, table.uniqueId),
 ]);
 
 export const vaultItemsRelations = relations(vaultItems, ({ one }) => ({

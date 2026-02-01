@@ -17,12 +17,14 @@ export function parseCSV(file: File): Promise<ParseResult> {
           const amount = findField(row, ['amount', 'debit', 'transaction amount']);
           const description = findField(row, ['description', 'memo', 'payee', 'merchant']);
           const account = findField(row, ['account', 'account number']);
+          const counterpartyAccount = findField(row, ['counterparty', 'beneficiary', 'recipient', 'sender', 'iban', 'other account']);
 
           return {
             date: date || '',
             amount: amount || '0',
             description: description || 'Unknown',
             account: account,
+            counterpartyAccount: counterpartyAccount,
             raw: row
           };
         });

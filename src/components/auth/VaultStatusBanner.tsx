@@ -2,16 +2,13 @@
 
 import { useVault } from '@/src/components/auth/VaultProvider';
 import { Button } from '@/components/ui/button';
-import { Lock, PlusCircle, Unlock, X } from 'lucide-react';
+import { Lock, PlusCircle } from 'lucide-react';
 import { useState } from 'react';
 import { PassphraseSetup } from './PassphraseSetup';
 import { UnlockScreen } from './UnlockScreen';
 import {
     Dialog,
     DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
 

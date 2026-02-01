@@ -2,8 +2,10 @@ export type TransactionRow = {
   date: string;
   amount: string;
   description: string;
-  // Account identifier if present in CSV
+  // Account identifier if present in CSV (User's account)
   account?: string;
+  // External account (Counterparty/Destination/Source)
+  counterpartyAccount?: string;
   // Original raw data for reference
   raw: Record<string, string>;
 };

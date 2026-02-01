@@ -3,8 +3,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { checkUserSetup } from '@/src/server/actions/auth';
-import { PassphraseSetup } from './PassphraseSetup';
-import { UnlockScreen } from './UnlockScreen';
 import { Loader2 } from 'lucide-react';
 import { UserMeta } from '@/src/types/database';
 
@@ -39,36 +37,36 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const [dek, setDek] = useState<CryptoKey | null>(null);
 
     // Check setup status when user loads
-  useEffect(() => {
-    async function checkSetup() {
-      if (!isUserLoaded || !user) {
-        setIsSetupChecked(true); // Nothing to check if no user
-        return;
-      }
+    useEffect(() => {
+        async function checkSetup() {
+            if (!isUserLoaded || !user) {
+                setIsSetupChecked(true); // Nothing to check if no user
+                return;
+            }
 
-      try {
-        const result = await checkUserSetup();
-        // Server action returns plain object, need to cast or ensure it matches
-        // But checkUserSetup currently returns { isSetup, userId } or similar
-        // We need to update checkUserSetup to return the full meta if established
+            try {
+                const result = await checkUserSetup();
+                // Server action returns plain object, need to cast or ensure it matches
+                // But checkUserSetup currently returns { isSetup, userId } or similar
+                // We need to update checkUserSetup to return the full meta if established
 
-        // Wait, checkUserSetup needs to be improved to return the meta if it exists
-        // Let's modify the server action first to return the META if found.
-        if (result.meta) {
-          setUserMeta(result.meta as unknown as UserMeta);
-        } else {
-            // Explicitly set null if not found to handle logout/switch cases
-            setUserMeta(null);
+                // Wait, checkUserSetup needs to be improved to return the meta if it exists
+                // Let's modify the server action first to return the META if found.
+                if (result.meta) {
+                    setUserMeta(result.meta as unknown as UserMeta);
+                } else {
+                    // Explicitly set null if not found to handle logout/switch cases
+                    setUserMeta(null);
+                }
+            } catch (e) {
+                console.error("Failed to check setup", e);
+            } finally {
+                setIsSetupChecked(true);
+            }
         }
-      } catch (e) {
-        console.error("Failed to check setup", e);
-      } finally {
-        setIsSetupChecked(true);
-      }
-    }
 
-    checkSetup();
-  }, [isUserLoaded, user]);
+        checkSetup();
+    }, [isUserLoaded, user]);
 
     const lock = useCallback(() => {
         setDek(null);

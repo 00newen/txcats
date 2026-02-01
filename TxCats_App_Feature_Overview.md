@@ -194,3 +194,85 @@
 
 - **Cross-device sync** (client-encrypted data blobs)
 - **2FA for login** (non-passphrase related)
+
+---
+
+## 🔁 Transaction Deduplication & Idempotent Storage
+
+TxCats must prevent storing duplicate bank transactions, even when the same CSV file is imported multiple times, imported from different devices, or partially re-imported.
+
+### Deterministic Transaction IDs
+
+- Every transaction **must have a deterministic, client-generated `id`**.
+- The `id` is generated **before encryption** and **before sending data to the server**.
+- The server must treat the transaction `id` as opaque and must never derive it from plaintext.
+
+#### ID generation rules (client-side)
+
+1. **If the bank/CSV provides a stable transaction identifier** (e.g. mutation ID, entry ID):
+   - Use it as part of the fingerprint.
+2. **Otherwise**, generate a fingerprint from a stable combination of CSV fields, such as:
+   - account identifier
+   - transaction date (as provided by the bank)
+   - amount + currency
+   - description / counterparty text
+3. Canonicalize the fingerprint deterministically (normalized strings, stable ordering).
+4. Generate the transaction `id` as a cryptographic hash (e.g. SHA-256) of the fingerprint.
+5. The same real-world transaction must always produce the same `id`.
+
+### Server-Side Uniqueness Constraint
+
+- The database must enforce uniqueness using a constraint on: (vault_id, resource_type, id)
+- This constraint is the **single source of truth** for deduplication.
+
+### UPSERT-Based Persistence
+
+- The server must use **UPSERT semantics** when persisting transactions.
+
+#### Import behavior (CSV uploads)
+
+- Use `INSERT … ON CONFLICT DO NOTHING`
+- If a transaction with the same `(vault_id, resource_type, id)` already exists:
+- The insert is ignored
+- Existing ciphertext remains unchanged
+- This guarantees:
+- Safe re-imports
+- Idempotent imports
+- No duplicate transactions
+
+#### Update behavior (edits, categorization changes)
+
+- Use `INSERT … ON CONFLICT DO UPDATE`
+- Existing records are updated when:
+- Category changes
+- Manual overrides occur
+- Learning-related fields are modified
+
+### Client Responsibilities
+
+- The client **must not** query the server to check whether a transaction already exists.
+- The client **must not** keep a full in-memory index to detect duplicates.
+- The client simply:
+1. Generates deterministic IDs
+2. Encrypts the records
+3. Sends them in bulk to the server
+
+### Server Responsibilities
+
+- The server must:
+- Never inspect or derive meaning from ciphertext
+- Never attempt plaintext-based deduplication
+- Rely entirely on database constraints + UPSERT logic
+- Deduplication must remain correct across:
+- sessions
+- devices
+- users (future vault sharing)
+- repeated imports
+
+### Design Rationale
+
+- Deduplication is enforced **at the database level**, not in application logic.
+- Encryption randomness (unique IVs) does not affect deduplication, since uniqueness is based on deterministic IDs.
+- This approach scales cleanly and remains compatible with future vault sharing without requiring re-encryption.
+
+
