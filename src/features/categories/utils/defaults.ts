@@ -22,7 +22,6 @@ export async function prepareDefaultCategories(vaultId: string): Promise<Categor
     DEFAULT_CATEGORY_SET.map(async (def) => ({
       id: await generateCategoryId(vaultId, def.name),
       name: def.name,
-      type: def.type,
       color: def.color,
       icon: def.icon,
       isDefault: true,

@@ -8,12 +8,15 @@ export type TransactionRow = {
   accountId?: string;
   valueDate?: string;
   counterparty?: string;
-  merchantOrName?: string;
   currency?: string;     // ISO 3-letter code, default config if missing
   bankTxId?: string;
 
   // Categorization
   categoryId?: string; 
+
+  // Dynamic Display
+  merchantOrName?: string;
+  extraColumns?: Record<string, string>;
 
   // Internal / Original
   rawRow: Record<string, string>;
@@ -29,6 +32,7 @@ export type CsvMapping = {
   merchantOrName?: string;
   currency?: string;
   bankTxId?: string;
+  extraColumns?: string[];
 };
 
 export type ParseResult = {
@@ -40,4 +44,10 @@ export type ParseResult = {
   meta: {
     fields: string[];
   };
+};
+
+export type MappingProfile = {
+  id: string; // The fingerprint
+  mapping: CsvMapping;
+  updatedAt: string;
 };

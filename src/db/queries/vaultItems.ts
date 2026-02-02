@@ -61,8 +61,7 @@ export async function createVaultItemsBulk(
   const query = db.insert(vaultItems).values(items as any);
 
   if (upsertMode) {
-      // UPdate on conflict
-      const ids = items.map(i => i.uniqueId).filter(Boolean);
+      // Update on conflict
       return await query.onConflictDoUpdate({
           target: [vaultItems.vaultId, vaultItems.resourceType, vaultItems.uniqueId], // Must match unique index columns
           set: {

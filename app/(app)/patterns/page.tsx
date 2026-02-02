@@ -1,21 +1,92 @@
-import { PageHeader } from '@/components/core/PageHeader';
-import { Card, CardContent } from '@/components/ui/card';
+'use client';
+
+import { useVault } from '@/src/components/auth/VaultProvider';
+import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
+import { PatternManager } from '@/src/features/patterns/components/PatternManager';
+import { PatternItem } from '@/src/features/patterns/types';
+import { CategoryItem } from '@/src/features/categories/types';
+import { Loader2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { decryptData } from '@/src/crypto/encryption';
+import { fetchPatterns } from '@/src/server/actions/patterns';
+import { fetchCategories } from '@/src/server/actions/categories';
 
 export default function PatternsPage() {
+  const { dek } = useVault();
+  const [patterns, setPatterns] = useState<PatternItem[]>([]);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadData = useCallback(async () => {
+    if (!dek) return;
+    setIsLoading(true);
+    try {
+      // Fetch Categories first (needed for patterns)
+      const catRes = await fetchCategories();
+      const decCategories: CategoryItem[] = [];
+      if (catRes.success && catRes.items) {
+        for (const item of catRes.items) {
+          try {
+            const aad = new TextEncoder().encode('category');
+            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
+            decCategories.push(plain as CategoryItem);
+          } catch { }
+        }
+      }
+      setCategories(decCategories);
+
+      // Fetch Patterns
+      const patRes = await fetchPatterns();
+      const decPatterns: PatternItem[] = [];
+      if (patRes.success && patRes.items) {
+        for (const item of patRes.items) {
+          try {
+            const aad = new TextEncoder().encode('pattern');
+            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
+            decPatterns.push(plain as PatternItem);
+          } catch { }
+        }
+      }
+      setPatterns(decPatterns);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [dek]);
+
+  useEffect(() => {
+    if (dek) {
+      loadData();
+    }
+  }, [dek, loadData]);
+
+  if (isLoading && patterns.length === 0) {
+    return (
+      <ProtectedVaultContent>
+        <div className="flex justify-center items-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </ProtectedVaultContent>
+    );
+  }
+
   return (
-    <>
-      <PageHeader
-        title="Patterns"
-        subtitle="View learned categorization patterns"
-      />
-      <Card>
-        <CardContent className="pt-6">
+    <ProtectedVaultContent>
+      <div className="container mx-auto p-6 space-y-6">
+        <div className="flex flex-col space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight">Patterns</h1>
           <p className="text-muted-foreground">
-            Automate your workflow with smart rules. Review and refine the intelligent patterns that the system uses to automatically categorize your transactions. By teaching the app your preferences, you save time and ensure consistent reporting across your entire financial history.
+            Manage automation rules to categorize your transactions automatically.
           </p>
-        </CardContent>
-      </Card>
-    </>
+        </div>
+
+        <PatternManager
+          patterns={patterns}
+          categories={categories}
+          onRefresh={loadData}
+        />
+      </div>
+    </ProtectedVaultContent>
   );
 }
-

@@ -14,7 +14,8 @@ export type EncryptedPayload = {
 
 export async function saveEncryptedItems(
   resourceType: string,
-  payloads: EncryptedPayload[]
+  payloads: EncryptedPayload[],
+  upsertMode: boolean = false
 ) {
   const { userId } = await auth();
   if (!userId) throw new Error('Unauthorized');
@@ -39,7 +40,7 @@ export async function saveEncryptedItems(
   
   for (let i = 0; i < itemsToInsert.length; i += BATCH_SIZE) {
      const batch = itemsToInsert.slice(i, i + BATCH_SIZE);
-     const inserted = await createVaultItemsBulk(batch);
+     const inserted = await createVaultItemsBulk(batch, upsertMode);
      insertedCount += inserted.length;
   }
 

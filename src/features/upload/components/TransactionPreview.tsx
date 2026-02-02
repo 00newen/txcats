@@ -4,14 +4,22 @@ import { TransactionRow } from '@/src/features/upload/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+
+import { CategoryItem } from '../../categories/types';
+
+import { Button } from '@/components/ui/button';
+import { ArrowLeft } from 'lucide-react';
 
 interface TransactionPreviewProps {
     data: TransactionRow[];
+    categories?: CategoryItem[];
+    onBack: () => void;
     onReset: () => void;
     onConfirm: () => void;
 }
 
-export function TransactionPreview({ data, onReset, onConfirm }: TransactionPreviewProps) {
+export function TransactionPreview({ data, categories, onBack, onReset, onConfirm }: TransactionPreviewProps) {
     // Show only first 50 rows for preview performance
     const previewData = data.slice(0, 50);
 
@@ -60,13 +68,14 @@ export function TransactionPreview({ data, onReset, onConfirm }: TransactionPrev
                         <CardTitle>Preview Transactions</CardTitle>
                         <CardDescription>Found {data.length} transactions. Showing the first 50.</CardDescription>
                     </div>
-                    <div className="space-x-2">
-                        <button onClick={onReset} className="text-sm font-medium text-muted-foreground hover:text-foreground">
-                            Cancel
-                        </button>
-                        <button onClick={onConfirm} className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium text-sm">
+                    <div className="flex items-center gap-3">
+                        <Button variant="ghost" onClick={onBack} size="sm" className="rounded-xl">
+                            <ArrowLeft className="w-4 h-4 mr-2" />
+                            Back to Mapping
+                        </Button>
+                        <Button onClick={onConfirm} className="rounded-xl shadow-lg px-6 font-bold">
                             Import {data.length} Transactions
-                        </button>
+                        </Button>
                     </div>
                 </CardHeader>
                 <CardContent>
@@ -77,28 +86,85 @@ export function TransactionPreview({ data, onReset, onConfirm }: TransactionPrev
                                     <TableHead>Date</TableHead>
                                     <TableHead>Description</TableHead>
                                     <TableHead>Amount</TableHead>
+                                    <TableHead>Type</TableHead>
+                                    <TableHead>Category</TableHead>
                                     <TableHead>My Account</TableHead>
                                     <TableHead>Counterparty</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {previewData.map((row, i) => (
-                                    <TableRow key={i}>
-                                        <TableCell className="font-medium">
-                                            {row.bookingDate ? row.bookingDate : <span className="text-red-400">Missing</span>}
-                                        </TableCell>
-                                        <TableCell>{row.description}</TableCell>
-                                        <TableCell className={parseFloat(row.amount.replace(/[^0-9.-]/g, "")) < 0 ? 'text-red-500' : 'text-green-600'}>
-                                            {row.amount}
-                                        </TableCell>
-                                        <TableCell>
-                                            {row.accountId ? <Badge variant="outline">{row.accountId}</Badge> : '-'}
-                                        </TableCell>
-                                        <TableCell>
-                                            {row.counterparty ? <span className="text-xs font-mono">{row.counterparty}</span> : <span className="text-muted-foreground text-xs">-</span>}
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
+                                {previewData.map((row, i) => {
+                                    const category = categories?.find(c => c.id === row.categoryId);
+
+                                    // Collect all account IDs for transfer inference
+                                    const allAccountIds = new Set(data.map(d => d.accountId).filter(Boolean));
+
+                                    const amount = parseFloat(row.amount.replace(/[^0-9.-]/g, ""));
+                                    const isTransfer = row.counterparty && allAccountIds.has(row.counterparty);
+                                    const type = isTransfer ? 'transfer' : (amount > 0 ? 'income' : 'expense');
+
+                                    return (
+                                        <TableRow key={i}>
+                                            <TableCell className="font-medium whitespace-nowrap">
+                                                {row.bookingDate ? row.bookingDate : <span className="text-red-400">Missing</span>}
+                                            </TableCell>
+                                            <TableCell className="max-w-[300px]">
+                                                <div className="flex flex-col">
+                                                    {row.merchantOrName && <span className="font-bold text-sm">{row.merchantOrName}</span>}
+                                                    <span className={cn("text-xs line-clamp-1", row.merchantOrName ? "text-muted-foreground" : "font-medium text-foreground")}>
+                                                        {row.description}
+                                                    </span>
+
+                                                    {row.extraColumns && Object.keys(row.extraColumns).length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-1.5">
+                                                            {Object.entries(row.extraColumns).map(([k, v]) => (
+                                                                <span key={k} className="text-[9px] bg-muted px-1.5 py-0.5 rounded border border-muted-foreground/10 text-muted-foreground whitespace-nowrap">
+                                                                    <span className="font-bold opacity-60 uppercase mr-1">{k}:</span>
+                                                                    {v || '-'}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className={amount < 0 ? 'text-red-500 font-mono' : 'text-green-600 font-mono'}>
+                                                {row.amount}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge
+                                                    variant={type === 'transfer' ? 'outline' : (type === 'income' ? 'default' : 'secondary')}
+                                                    className={cn(
+                                                        "capitalize",
+                                                        type === 'income' && "bg-green-100 text-green-800 hover:bg-green-100",
+                                                        type === 'expense' && "bg-red-100 text-red-800 hover:bg-red-100",
+                                                        type === 'transfer' && "bg-blue-100 text-blue-800 border-blue-200"
+                                                    )}
+                                                >
+                                                    {type}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                {category ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <div
+                                                            className="w-2 h-2 rounded-full"
+                                                            style={{ backgroundColor: category.color }}
+                                                        />
+                                                        <span className="text-xs font-semibold">{category.name}</span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-muted-foreground text-xs italic">Uncategorized</span>
+                                                )}
+                                            </TableCell>
+                                            <TableCell>
+                                                {row.accountId ? <Badge variant="outline">{row.accountId}</Badge> : '-'}
+                                            </TableCell>
+                                            <TableCell>
+                                                {row.counterparty ? <span className="text-xs font-mono">{row.counterparty}</span> : <span className="text-muted-foreground text-xs">-</span>}
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })}
                             </TableBody>
                         </Table>
                     </div>
