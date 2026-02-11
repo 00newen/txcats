@@ -11,10 +11,10 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { ThemeProvider } from '@/lib/providers/ThemeProvider';
 import { Providers } from '@/src/components/providers/Providers';
 import { VaultProvider } from '@/src/components/auth/VaultProvider';
-import { VaultStatusBanner } from '@/src/components/auth/VaultStatusBanner';
 import { Toaster } from '@/components/ui/toaster';
 import '@/styles/globals.css';
 import { ThemeToggle } from '@/components/core/ThemeToggle';
+import { AmountFormatSettings } from '@/components/core/AmountFormatSettings';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -47,13 +47,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </SignUpButton>
               </SignedOut>
               <SignedIn>
+                <AmountFormatSettings />
                 <ThemeToggle />
                 <UserButton />
               </SignedIn>
             </header>
             <Providers>
               <VaultProvider>
-                <VaultStatusBanner />
                 {children}
               </VaultProvider>
             </Providers>

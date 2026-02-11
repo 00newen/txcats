@@ -19,6 +19,7 @@ export function UnlockScreen({ userMeta, onUnlock }: UnlockScreenProps) {
     const [passphrase, setPassphrase] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const { toast } = useToast();
+    const isDev = process.env.NODE_ENV === 'development';
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -79,43 +80,53 @@ export function UnlockScreen({ userMeta, onUnlock }: UnlockScreenProps) {
                         Unlock
                     </Button>
 
-                    <div className="w-full pt-4 border-t">
-                        <p className="text-xs text-muted-foreground text-center mb-2 font-mono">DEV OPTIONS</p>
-                        <div className="flex gap-2">
-                            <Button
-                                type="button"
-                                variant="destructive"
-                                size="sm"
-                                className="w-1/2 text-xs"
-                                onClick={async () => {
-                                    if (confirm("Reset TRANSACTIONS only? This cannot be undone.")) {
-                                        const { devResetTransactions } = await import('@/src/server/actions/dev');
-                                        await devResetTransactions();
-                                        toast({ title: "Transactions Reset", description: "All transaction data wiped." });
-                                        window.location.reload();
-                                    }
-                                }}
-                            >
-                                Reset Txs
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="destructive"
-                                size="sm"
-                                className="w-1/2 text-xs"
-                                onClick={async () => {
-                                    if (confirm("Reset FULL ACCOUNT? This deletes keys, vault, and data. You will need to start over.")) {
-                                        const { devResetFullAccount } = await import('@/src/server/actions/dev');
-                                        await devResetFullAccount();
-                                        toast({ title: "Account Reset", description: "Vault wiped. Refreshing..." });
-                                        window.location.reload();
-                                    }
-                                }}
-                            >
-                                Reset All
-                            </Button>
+                    {isDev && (
+                        <div className="w-full pt-4 border-t">
+                            <p className="text-xs text-muted-foreground text-center mb-2 font-mono">DEV OPTIONS</p>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    className="w-1/2 text-xs"
+                                    onClick={async () => {
+                                        if (confirm("Reset TRANSACTIONS only? This cannot be undone.")) {
+                                            try {
+                                                const { devResetTransactions } = await import('@/src/server/actions/dev');
+                                                await devResetTransactions();
+                                                toast({ title: "Transactions Reset", description: "All transaction data wiped." });
+                                                window.location.reload();
+                                            } catch {
+                                                toast({ title: "Reset failed", description: "Dev reset is only available in development.", variant: "destructive" });
+                                            }
+                                        }
+                                    }}
+                                >
+                                    Reset Txs
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    className="w-1/2 text-xs"
+                                    onClick={async () => {
+                                        if (confirm("Reset FULL ACCOUNT? This deletes keys, vault, and data. You will need to start over.")) {
+                                            try {
+                                                const { devResetFullAccount } = await import('@/src/server/actions/dev');
+                                                await devResetFullAccount();
+                                                toast({ title: "Account Reset", description: "Vault wiped. Refreshing..." });
+                                                window.location.reload();
+                                            } catch {
+                                                toast({ title: "Reset failed", description: "Dev reset is only available in development.", variant: "destructive" });
+                                            }
+                                        }
+                                    }}
+                                >
+                                    Reset All
+                                </Button>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </CardFooter>
             </form>
         </Card>

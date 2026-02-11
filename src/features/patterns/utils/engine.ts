@@ -41,6 +41,42 @@ export function matchTransaction(
 }
 
 /**
+ * Similar to matchTransaction but returns the full pattern object.
+ */
+export function findMatchingPattern(
+    transaction: TransactionRow,
+    patterns: PatternItem[]
+): PatternItem | undefined {
+    const sortedPatterns = [...patterns].sort((a, b) => b.priority - a.priority);
+    const description = transaction.description.toLowerCase();
+    const merchant = (transaction.merchantOrName || '').toLowerCase();
+
+    for (const pattern of sortedPatterns) {
+        const matchStr = pattern.matchString.toLowerCase();
+        
+        if (pattern.matchType === 'contains') {
+            if (description.includes(matchStr) || merchant.includes(matchStr)) {
+                return pattern;
+            }
+        } else if (pattern.matchType === 'exact') {
+            if (description === matchStr || merchant === matchStr) {
+                return pattern;
+            }
+        } else if (pattern.matchType === 'regex') {
+            try {
+                const regex = new RegExp(pattern.matchString, 'i');
+                if (regex.test(transaction.description) || (transaction.merchantOrName && regex.test(transaction.merchantOrName))) {
+                    return pattern;
+                }
+            } catch (e) {
+                console.error("Invalid regex in pattern:", pattern.id, e);
+            }
+        }
+    }
+    return undefined;
+}
+
+/**
  * Processes a list of transactions against patterns.
  * Returns updated transactions with categoryId assigned if matched.
  */

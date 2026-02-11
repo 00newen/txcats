@@ -10,9 +10,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { decryptData } from '@/src/crypto/encryption';
 import { fetchPatterns } from '@/src/server/actions/patterns';
 import { fetchCategories } from '@/src/server/actions/categories';
+import { useUser } from '@clerk/nextjs';
+import { cn } from '@/lib/utils';
 
 export default function PatternsPage() {
   const { dek } = useVault();
+  const { isSignedIn } = useUser();
   const [patterns, setPatterns] = useState<PatternItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,7 +33,7 @@ export default function PatternsPage() {
             const aad = new TextEncoder().encode('category');
             const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
             decCategories.push(plain as CategoryItem);
-          } catch { }
+          } catch {}
         }
       }
       setCategories(decCategories);
@@ -44,7 +47,7 @@ export default function PatternsPage() {
             const aad = new TextEncoder().encode('pattern');
             const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
             decPatterns.push(plain as PatternItem);
-          } catch { }
+          } catch {}
         }
       }
       setPatterns(decPatterns);
@@ -58,14 +61,16 @@ export default function PatternsPage() {
   useEffect(() => {
     if (dek) {
       loadData();
+    } else {
+      setIsLoading(false);
     }
   }, [dek, loadData]);
 
-  if (isLoading && patterns.length === 0) {
+  if (isLoading && patterns.length === 0 && isSignedIn) {
     return (
       <ProtectedVaultContent>
-        <div className="flex justify-center items-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className='flex justify-center items-center h-64'>
+          <Loader2 className='h-8 w-8 animate-spin text-muted-foreground' />
         </div>
       </ProtectedVaultContent>
     );
@@ -73,19 +78,17 @@ export default function PatternsPage() {
 
   return (
     <ProtectedVaultContent>
-      <div className="container mx-auto p-6 space-y-6">
-        <div className="flex flex-col space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight">Patterns</h1>
-          <p className="text-muted-foreground">
+      <div className='container mx-auto p-6 space-y-6'>
+        <div className='flex flex-col space-y-2'>
+          <h1 className='text-3xl font-bold tracking-tight'>Patterns</h1>
+          <p className='text-muted-foreground'>
             Manage automation rules to categorize your transactions automatically.
           </p>
         </div>
 
-        <PatternManager
-          patterns={patterns}
-          categories={categories}
-          onRefresh={loadData}
-        />
+        <div className={cn('transition-opacity', !isLoading && 'animate-in fade-in-50')}>
+          <PatternManager patterns={patterns} categories={categories} onRefresh={loadData} />
+        </div>
       </div>
     </ProtectedVaultContent>
   );

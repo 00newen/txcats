@@ -11,9 +11,9 @@ import { revalidatePath } from 'next/cache';
  * Keeps categories, patterns, profiles, etc.
  */
 export async function devResetTransactions() {
-  // if (process.env.NODE_ENV !== 'development') {
-  //   throw new Error('Dev only!');
-  // }
+  if (process.env.NODE_ENV !== 'development') {
+    throw new Error('Dev only!');
+  }
   
   const { userId } = await auth();
   if (!userId) throw new Error('Unauthorized');
@@ -46,9 +46,9 @@ export async function devResetTransactions() {
  * Simulates a fresh start (as if user just signed up).
  */
 export async function devResetFullAccount() {
-  // if (process.env.NODE_ENV !== 'development') {
-  //   throw new Error('Dev only!');
-  // }
+  if (process.env.NODE_ENV !== 'development') {
+    throw new Error('Dev only!');
+  }
 
   const { userId } = await auth();
   if (!userId) throw new Error('Unauthorized');

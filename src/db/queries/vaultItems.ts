@@ -1,7 +1,7 @@
 import { db } from '..';
 import { vaultItems } from '../schema';
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { VaultItem, InsertVaultItem } from '../../types/database';
+import { VaultItem } from '../../types/database';
 
 /**
  * Get all active items in a vault

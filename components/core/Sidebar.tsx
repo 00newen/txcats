@@ -16,6 +16,10 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useVault } from '@/src/components/auth/VaultProvider';
+import { fetchTransactions } from '@/src/server/actions/transactions';
+import { decryptData } from '@/src/crypto/encryption';
+import { useEffect, useCallback } from 'react';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -29,7 +33,44 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { dek } = useVault();
   const [isOpen, setIsOpen] = useState(false);
+  const [uncategorizedCount, setUncategorizedCount] = useState<number | null>(null);
+
+  const loadUncategorizedCount = useCallback(async () => {
+    if (!dek) return;
+    try {
+      const response = await fetchTransactions();
+      if (response.success && response.items) {
+        let count = 0;
+        for (const item of response.items) {
+          try {
+            const aadBytes = new Uint8Array(atob(item.aadBase64).split('').map(c => c.charCodeAt(0)));
+            const plaintext = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes) as any;
+            if (!plaintext.categoryId) {
+              count++;
+            }
+          } catch (e) {
+            // Decryption might fail if item is not a transaction or wrong key
+          }
+        }
+        setUncategorizedCount(count);
+      }
+    } catch (e) {
+      console.error('Failed to load count', e);
+    }
+  }, [dek]);
+
+  useEffect(() => {
+    loadUncategorizedCount();
+  }, [loadUncategorizedCount]);
+
+  // Listen for updates from other pages
+  useEffect(() => {
+    const handleUpdate = () => loadUncategorizedCount();
+    window.addEventListener('tx-count-changed', handleUpdate);
+    return () => window.removeEventListener('tx-count-changed', handleUpdate);
+  }, [loadUncategorizedCount]);
 
   return (
     <>
@@ -83,7 +124,17 @@ export function Sidebar() {
                   )}
                 >
                   <Icon className="h-5 w-5" />
-                  <span>{item.label}</span>
+                  <span className="flex-1">{item.label}</span>
+                  {item.label === 'Categorize' && uncategorizedCount !== null && uncategorizedCount > 0 && (
+                    <span className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-bold",
+                      isActive
+                        ? "bg-primary-foreground text-primary"
+                        : "bg-primary text-primary-foreground"
+                    )}>
+                      {uncategorizedCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

@@ -13,6 +13,9 @@ import { useToast } from '@/hooks/use-toast';
 import { encryptData } from '@/src/crypto/encryption';
 import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
 import { deletePattern } from '@/src/server/actions/patterns';
+import { fetchTransactions } from '@/src/server/actions/transactions';
+import { decryptData } from '@/src/crypto/encryption';
+import { TransactionRow } from '../../upload/types';
 
 interface PatternManagerProps {
     patterns: PatternItem[];
@@ -29,6 +32,39 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
     const [matchString, setMatchString] = useState('');
     const [categoryId, setCategoryId] = useState('');
     const [matchType, setMatchType] = useState<PatternItem['matchType']>('contains');
+
+    const countAffectedTransactions = async (newRule: PatternItem): Promise<number> => {
+        if (!dek) return 0;
+        const txRes = await fetchTransactions();
+        if (!txRes.success || !txRes.items) return 0;
+
+        let count = 0;
+        for (const item of txRes.items) {
+            try {
+                const aadBytes = new Uint8Array(atob(item.aadBase64).split('').map(c => c.charCodeAt(0)));
+                const tx = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes) as TransactionRow;
+                const description = tx.description.toLowerCase();
+                const merchant = (tx.merchantOrName || '').toLowerCase();
+                const match = newRule.matchString.toLowerCase();
+
+                let matched = false;
+                if (newRule.matchType === 'contains') matched = description.includes(match) || merchant.includes(match);
+                else if (newRule.matchType === 'exact') matched = description === match || merchant === match;
+                else if (newRule.matchType === 'regex') {
+                    try {
+                        const regex = new RegExp(newRule.matchString, 'i');
+                        matched = regex.test(tx.description) || (!!tx.merchantOrName && regex.test(tx.merchantOrName));
+                    } catch {
+                        matched = false;
+                    }
+                }
+
+                if (matched) count++;
+            } catch { }
+        }
+
+        return count;
+    };
 
     const handleAdd = async () => {
         if (!dek || !matchString.trim() || !categoryId) return;
@@ -54,7 +90,11 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
                 aadBase64
             }]);
 
-            toast({ title: "Pattern Added", description: `"${matchString}" will now map to ${categories.find(c => c.id === categoryId)?.name}` });
+            const affectedCount = await countAffectedTransactions(newItem);
+            toast({
+                title: "Pattern Added",
+                description: `"${matchString}" will now map to ${categories.find(c => c.id === categoryId)?.name}. ${affectedCount} TXs match this rule.`
+            });
             setMatchString('');
             onRefresh();
         } catch (e) {
