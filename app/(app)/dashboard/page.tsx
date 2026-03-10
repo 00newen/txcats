@@ -21,14 +21,14 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { fetchTransactions } from '@/src/server/actions/transactions';
 import { fetchCategories } from '@/src/server/actions/categories';
 import { decryptData } from '@/src/crypto/encryption';
 import { TransactionRow } from '@/src/features/upload/types';
 import { CategoryItem } from '@/src/features/categories/types';
 import { startOfMonth, endOfMonth, format, parseISO, eachDayOfInterval, startOfYear, endOfYear, subDays } from 'date-fns';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/core/ThemeToggle';
@@ -37,6 +37,7 @@ import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
 
 type DashboardTx = TransactionRow & { uniqueId?: string };
+type ExpenseCategorySlice = { key: string; name: string; value: number };
 
 export default function DashboardPage() {
   const { isUnlocked, dek } = useVault();
@@ -50,7 +51,10 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [isLargestTxModalOpen, setIsLargestTxModalOpen] = useState(false);
+  const [selectedExpenseCategoryKey, setSelectedExpenseCategoryKey] = useState<string | null>(null);
   const { amountFormat } = useAmountFormat();
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+  const endDateInputRef = useRef<HTMLInputElement>(null);
 
   // Filters
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -266,6 +270,72 @@ export default function DashboardPage() {
     });
   }, [transactions, startDate, endDate]);
 
+  const expensesByCategory = useMemo(() => {
+    if (!transactions) return [];
+
+    const grouped = transactions.reduce(
+      (acc, tx) => {
+        const date = tx.bookingDate;
+        if (date < startDate || date > endDate) return acc;
+
+        const amount = parseAmount(tx.amount);
+        if (isNaN(amount) || amount >= 0) return acc;
+
+        const key = tx.categoryId || '__uncategorized__';
+        const name = tx.categoryId
+          ? categories.find((c) => c.id === tx.categoryId)?.name || 'Unknown'
+          : 'Uncategorized';
+        if (!acc[key]) {
+          acc[key] = { key, name, value: 0 };
+        }
+        acc[key].value += Math.abs(amount);
+        return acc;
+      },
+      {} as Record<string, ExpenseCategorySlice>,
+    );
+
+    return Object.values(grouped)
+      .map((item) => ({ ...item, value: parseFloat(item.value.toFixed(2)) }))
+      .sort((a, b) => b.value - a.value);
+  }, [transactions, startDate, endDate, categories]);
+
+  useEffect(() => {
+    if (expensesByCategory.length === 0) {
+      setSelectedExpenseCategoryKey(null);
+      return;
+    }
+
+    const hasSelection = selectedExpenseCategoryKey
+      ? expensesByCategory.some((item) => item.key === selectedExpenseCategoryKey)
+      : false;
+
+    if (!hasSelection) {
+      setSelectedExpenseCategoryKey(expensesByCategory[0].key);
+    }
+  }, [expensesByCategory, selectedExpenseCategoryKey]);
+
+  const selectedExpenseCategory = useMemo(
+    () => expensesByCategory.find((item) => item.key === selectedExpenseCategoryKey) || null,
+    [expensesByCategory, selectedExpenseCategoryKey],
+  );
+
+  const selectedCategoryTransactions = useMemo(() => {
+    if (!transactions || !selectedExpenseCategoryKey) return [];
+
+    return [...transactions]
+      .filter((tx) => {
+        const date = tx.bookingDate;
+        if (date < startDate || date > endDate) return false;
+
+        const amount = parseAmount(tx.amount);
+        if (isNaN(amount) || amount >= 0) return false;
+
+        const key = tx.categoryId || '__uncategorized__';
+        return key === selectedExpenseCategoryKey;
+      })
+      .sort((a, b) => new Date(b.bookingDate).getTime() - new Date(a.bookingDate).getTime());
+  }, [transactions, selectedExpenseCategoryKey, startDate, endDate]);
+
   const recentActivity = useMemo(() => {
     if (!transactions) return [];
     return [...transactions]
@@ -381,6 +451,19 @@ export default function DashboardPage() {
     [clampToBounds, txDateBounds],
   );
 
+  const isThisMonthSelection = useMemo(() => {
+    if (!txDateBounds) return false;
+
+    let monthStart = clampToBounds(format(startOfMonth(new Date()), 'yyyy-MM-dd'), txDateBounds);
+    const monthEnd = clampToBounds(format(endOfMonth(new Date()), 'yyyy-MM-dd'), txDateBounds);
+
+    if (monthStart > monthEnd) {
+      monthStart = monthEnd;
+    }
+
+    return startDate === monthStart && endDate === monthEnd;
+  }, [clampToBounds, endDate, startDate, txDateBounds]);
+
   useEffect(() => {
     if (!txDateBounds) return;
     applyRange(startDate, endDate);
@@ -413,6 +496,12 @@ export default function DashboardPage() {
     selectThisMonth();
   };
 
+  const openDatePicker = (input: HTMLInputElement | null) => {
+    if (!input) return;
+    input.showPicker?.();
+    input.focus();
+  };
+
   const periodTransactionsHref = `/transactions?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
   const largestTxHref =
     periodInsights?.largestTx &&
@@ -421,6 +510,8 @@ export default function DashboardPage() {
     }&txDate=${encodeURIComponent(periodInsights.largestTx.tx.bookingDate)}&txAmount=${encodeURIComponent(
       periodInsights.largestTx.tx.amount,
     )}&txDesc=${encodeURIComponent(periodInsights.largestTx.tx.description || '')}`;
+  const expenseCategoryColors = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1'];
+  const expenseTotal = expensesByCategory.reduce((acc, item) => acc + item.value, 0);
 
   return (
     <div className='container mx-auto p-4 md:p-6 space-y-8 max-w-7xl'>
@@ -529,8 +620,9 @@ export default function DashboardPage() {
         </div>
 
         <div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
-          {/* Chart Section */}
-          <Card className={cn('lg:col-span-2 shadow-xl border-none transition-opacity', !isLoading && 'animate-in fade-in-50')}>
+          <div className='lg:col-span-2'>
+            {/* Chart Section */}
+            <Card className={cn('shadow-xl border-none transition-opacity', !isLoading && 'animate-in fade-in-50')}>
             <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-7'>
               <div>
                 <CardTitle className='text-xl font-black'>Cash Flow</CardTitle>
@@ -554,12 +646,6 @@ export default function DashboardPage() {
                       </span>
                     </div>
                   </div>
-                  <Badge
-                    variant={stats && stats.net >= 0 ? 'default' : 'destructive'}
-                    className='text-[9px] font-black tracking-[0.15em] px-2.5 py-0.5 h-5 uppercase ml-auto'
-                  >
-                    {stats && stats.net >= 0 ? 'Net Positive' : 'Net Negative'}
-                  </Badge>
                 </div>
               </div>
               <div className='flex items-center gap-2'>
@@ -589,7 +675,7 @@ export default function DashboardPage() {
                     onClick={selectLast30Days}
                     disabled={!txDateBounds}
                   >
-                    30D
+                    Last 30D
                   </Button>
                   <Button
                     variant='ghost'
@@ -600,46 +686,51 @@ export default function DashboardPage() {
                   >
                     All
                   </Button>
-                  <div className='relative'>
+                  <div
+                    className='relative cursor-pointer'
+                    onClick={() => openDatePicker(startDateInputRef.current)}
+                  >
                     <Calendar className='absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none' />
                     <input
+                      ref={startDateInputRef}
                       type='date'
                       value={startDate}
                       min={txDateBounds?.min}
                       max={txDateBounds?.max}
                       disabled={!txDateBounds}
                       onChange={(e) => applyRange(e.target.value, endDate)}
-                      className='bg-transparent border-none text-[10px] font-bold pl-8 pr-2 py-1 focus:ring-0 outline-none w-32'
+                      className='bg-transparent border-none text-[10px] font-bold pl-8 pr-2 py-1 focus:ring-0 outline-none w-32 cursor-pointer [&::-webkit-calendar-picker-indicator]:hidden'
                     />
                   </div>
                   <span className='text-muted-foreground text-xs'>to</span>
-                  <div className='relative'>
+                  <div
+                    className='relative cursor-pointer'
+                    onClick={() => openDatePicker(endDateInputRef.current)}
+                  >
                     <Calendar className='absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none' />
                     <input
+                      ref={endDateInputRef}
                       type='date'
                       value={endDate}
                       min={txDateBounds?.min}
                       max={txDateBounds?.max}
                       disabled={!txDateBounds}
                       onChange={(e) => applyRange(startDate, e.target.value)}
-                      className='bg-transparent border-none text-[10px] font-bold pl-8 pr-2 py-1 focus:ring-0 outline-none w-32'
+                      className='bg-transparent border-none text-[10px] font-bold pl-8 pr-2 py-1 focus:ring-0 outline-none w-32 cursor-pointer [&::-webkit-calendar-picker-indicator]:hidden'
                     />
                   </div>
                 </div>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='h-8 w-8 text-muted-foreground'
-                  onClick={resetFilters}
-                  title='Reset to Current Month'
-                >
-                  <X className='w-4 h-4' />
-                </Button>
-                <Link href={periodTransactionsHref}>
-                  <Button variant='outline' size='sm' className='h-8 text-[10px] font-bold uppercase tracking-wider'>
-                    View Period TXs
+                {txDateBounds && startDate && endDate && !isThisMonthSelection && (
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='h-8 w-8 text-muted-foreground'
+                    onClick={resetFilters}
+                    title='Reset to Current Month'
+                  >
+                    <X className='w-4 h-4' />
                   </Button>
-                </Link>
+                )}
               </div>
             </CardHeader>
             {txDateBounds && (
@@ -748,17 +839,33 @@ export default function DashboardPage() {
                       itemStyle={{ fontWeight: 700 }}
                     />
                     <Legend
-                      iconType='circle'
                       verticalAlign='top'
                       align='right'
-                      wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontWeight: 'bold' }}
-                      formatter={(value) => (
-                        <span className='uppercase tracking-widest opacity-80'>
-                          {value}
-                          <span className='ml-2 opacity-50'>
-                            (${value === 'Income' ? formatAmount(stats?.income || 0, amountFormat) : formatAmount(stats?.expenses || 0, amountFormat)})
+                      content={({ payload }) => (
+                        <div className='flex items-center justify-end gap-2 pr-2 pb-5 text-[10px] font-bold'>
+                          {(payload || []).map((entry) => {
+                            const name = entry.value === 'Income' ? 'Income' : 'Expenses';
+                            const amount = name === 'Income' ? stats?.income || 0 : stats?.expenses || 0;
+                            return (
+                              <span key={name} className='inline-flex items-center gap-1.5 uppercase tracking-widest opacity-80'>
+                                <span className='inline-block h-2 w-2 rounded-full' style={{ backgroundColor: entry.color }} />
+                                {name}
+                                <span className='opacity-50'>(${formatAmount(amount, amountFormat)})</span>
+                              </span>
+                            );
+                          })}
+                          <span
+                            className={cn(
+                              'inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em]',
+                              (stats?.net || 0) >= 0
+                                ? 'border-green-200 bg-green-50 text-green-700'
+                                : 'border-red-200 bg-red-50 text-red-700',
+                            )}
+                          >
+                            Difference {(stats?.net || 0) >= 0 ? '+' : '-'}$
+                            {formatAmount(Math.abs(stats?.net || 0), amountFormat)}
                           </span>
-                        </span>
+                        </div>
                       )}
                     />
                     <Area
@@ -783,7 +890,156 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               )}
             </CardContent>
-          </Card>
+            <div className='px-6 pt-2 pb-6 border-t'>
+              <div className='mb-4'>
+                <h3 className='text-lg font-black'>Expenses by Category</h3>
+                <p className='text-xs text-muted-foreground'>Expense distribution for the selected period</p>
+              </div>
+              {isLoading ? (
+                <div className='h-[280px] flex flex-col items-center justify-center space-y-3'>
+                  <Loader2 className='w-8 h-8 animate-spin text-primary' />
+                  <p className='text-xs font-bold uppercase tracking-widest text-muted-foreground animate-pulse'>
+                    Preparing chart...
+                  </p>
+                </div>
+              ) : expensesByCategory.length === 0 ? (
+                <div className='h-[280px] flex items-center justify-center text-sm text-muted-foreground'>
+                  No expense data in this selected period.
+                </div>
+              ) : (
+                <>
+                  <div className='grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px] gap-4 items-center'>
+                    <div className='h-[280px]'>
+                      <ResponsiveContainer width='100%' height='100%'>
+                        <PieChart>
+                          <Pie
+                            data={expensesByCategory}
+                            dataKey='value'
+                            nameKey='name'
+                            cx='50%'
+                            cy='50%'
+                            innerRadius={60}
+                            outerRadius={95}
+                            paddingAngle={2}
+                            onClick={(_, index) => {
+                              const selected = expensesByCategory[index];
+                              if (selected) setSelectedExpenseCategoryKey(selected.key);
+                            }}
+                          >
+                            {expensesByCategory.map((entry, index) => {
+                              const isSelected = selectedExpenseCategoryKey === entry.key;
+                              return (
+                                <Cell
+                                  key={`expense-category-${entry.key}`}
+                                  fill={expenseCategoryColors[index % expenseCategoryColors.length]}
+                                  stroke={isSelected ? '#0f172a' : 'transparent'}
+                                  strokeWidth={isSelected ? 2 : 0}
+                                  fillOpacity={isSelected ? 1 : 0.55}
+                                  className='cursor-pointer'
+                                />
+                              );
+                            })}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value) => `$${formatAmount(Number(value) || 0, amountFormat)}`}
+                            contentStyle={{
+                              borderRadius: '12px',
+                              border: 'none',
+                              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                              fontSize: '12px',
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className='space-y-2'>
+                      <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>Category Split</p>
+                      <div className='space-y-1 max-h-[240px] overflow-auto pr-1'>
+                        {expensesByCategory.map((item, index) => {
+                          const pct = expenseTotal > 0 ? (item.value / expenseTotal) * 100 : 0;
+                          const isSelected = selectedExpenseCategoryKey === item.key;
+                          return (
+                            <button
+                              key={item.key}
+                              type='button'
+                              onClick={() => setSelectedExpenseCategoryKey(item.key)}
+                              className={cn(
+                                'w-full flex items-center justify-between gap-3 text-xs rounded-md px-2 py-1.5 text-left transition-colors',
+                                isSelected ? 'bg-muted border' : 'hover:bg-muted/50',
+                              )}
+                            >
+                              <span className='inline-flex items-center gap-2 min-w-0'>
+                                <span
+                                  className='inline-block h-2.5 w-2.5 rounded-full shrink-0'
+                                  style={{ backgroundColor: expenseCategoryColors[index % expenseCategoryColors.length] }}
+                                />
+                                <span className='truncate font-medium'>{item.name}</span>
+                              </span>
+                              <span className='font-black whitespace-nowrap'>
+                                ${formatAmount(item.value, amountFormat)} ({pct.toFixed(0)}%)
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className='mt-5 border rounded-lg'>
+                    <div className='px-3 py-2 border-b bg-muted/30 flex items-center justify-between gap-3'>
+                      <div>
+                        <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                          Selected Category Transactions
+                        </p>
+                        <p className='text-sm font-bold'>
+                          {selectedExpenseCategory?.name || 'None selected'}
+                        </p>
+                      </div>
+                      {selectedExpenseCategory && (
+                        <p className='text-xs font-black text-red-500'>
+                          -${formatAmount(selectedExpenseCategory.value, amountFormat)}
+                        </p>
+                      )}
+                    </div>
+                    {selectedCategoryTransactions.length === 0 ? (
+                      <div className='px-3 py-6 text-sm text-muted-foreground text-center'>
+                        No transactions found for this category in the selected period.
+                      </div>
+                    ) : (
+                      <div className='max-h-[260px] overflow-auto divide-y'>
+                        {selectedCategoryTransactions.slice(0, 25).map((tx, idx) => {
+                          const amount = Math.abs(parseAmount(tx.amount));
+                          return (
+                            <div key={`${tx.uniqueId || tx.bookingDate}-${idx}`} className='px-3 py-2.5 flex items-center justify-between gap-3'>
+                              <div className='min-w-0'>
+                                <p className='text-sm font-semibold truncate'>
+                                  {tx.merchantOrName || tx.description || 'Transaction'}
+                                </p>
+                                <p className='text-[10px] text-muted-foreground truncate'>
+                                  {tx.bookingDate} {tx.description ? `• ${tx.description}` : ''}
+                                </p>
+                              </div>
+                              <p className='text-xs font-black text-red-500 whitespace-nowrap'>
+                                -${formatAmount(amount, amountFormat)}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className='px-6 pb-6 flex justify-end'>
+              <Link href={periodTransactionsHref}>
+                <Button variant='outline' size='sm' className='h-8 text-[10px] font-bold uppercase tracking-wider'>
+                  View Period TXs
+                </Button>
+              </Link>
+            </div>
+            </Card>
+          </div>
 
           {/* Recent Activity */}
           <Card className='shadow-lg border-none'>

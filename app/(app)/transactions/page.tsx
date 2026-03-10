@@ -19,7 +19,7 @@ import { PatternItem } from '@/src/features/patterns/types';
 import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -28,9 +28,20 @@ import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
 import { useUser } from '@clerk/nextjs';
 
+function isDateOnly(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function normalizeCategoryFilter(value: string): string {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : 'all';
+}
+
 export default function TransactionsPage() {
   const { dek } = useVault();
   const { toast } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { amountFormat } = useAmountFormat();
   const { isSignedIn } = useUser();
@@ -51,6 +62,7 @@ export default function TransactionsPage() {
   const [selectedTx, setSelectedTx] = useState<(TransactionRow & { id: string; uniqueId: string }) | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const openedFromQueryRef = useRef<string>('');
+  const isHydratingFiltersFromUrlRef = useRef(true);
 
   // Pagination / Filter states in client for now
   const [page, setPage] = useState(1);
@@ -143,13 +155,17 @@ export default function TransactionsPage() {
   }, [dek, loadCategories, loadPatterns, loadTransactions]);
 
   useEffect(() => {
+    isHydratingFiltersFromUrlRef.current = true;
+
+    const nextCategory = searchParams.get('category') || '';
     const nextStart = searchParams.get('startDate') || '';
     const nextEnd = searchParams.get('endDate') || '';
-    const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
-    const safeStart = isDate(nextStart) ? nextStart : '';
-    const safeEnd = isDate(nextEnd) ? nextEnd : '';
+    const safeCategory = normalizeCategoryFilter(nextCategory);
+    const safeStart = isDateOnly(nextStart) ? nextStart : '';
+    const safeEnd = isDateOnly(nextEnd) ? nextEnd : '';
 
+    setCategoryFilter(safeCategory);
     if (safeStart && safeEnd && safeStart > safeEnd) {
       setStartDate(safeEnd);
       setEndDate(safeStart);
@@ -159,6 +175,36 @@ export default function TransactionsPage() {
     }
     setPage(1);
   }, [searchParams]);
+
+  useEffect(() => {
+    const currentCategory = normalizeCategoryFilter(searchParams.get('category') || '');
+    const currentStart = isDateOnly(searchParams.get('startDate') || '') ? searchParams.get('startDate') || '' : '';
+    const currentEnd = isDateOnly(searchParams.get('endDate') || '') ? searchParams.get('endDate') || '' : '';
+    const nextCategory = normalizeCategoryFilter(categoryFilter);
+    const nextStart = isDateOnly(startDate) ? startDate : '';
+    const nextEnd = isDateOnly(endDate) ? endDate : '';
+
+    if (isHydratingFiltersFromUrlRef.current) {
+      if (nextCategory !== currentCategory || nextStart !== currentStart || nextEnd !== currentEnd) return;
+      isHydratingFiltersFromUrlRef.current = false;
+      return;
+    }
+
+    if (nextCategory === currentCategory && nextStart === currentStart && nextEnd === currentEnd) return;
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextCategory !== 'all') params.set('category', nextCategory);
+    else params.delete('category');
+
+    if (nextStart) params.set('startDate', nextStart);
+    else params.delete('startDate');
+
+    if (nextEnd) params.set('endDate', nextEnd);
+    else params.delete('endDate');
+
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [categoryFilter, startDate, endDate, pathname, router, searchParams]);
 
   useEffect(() => {
     if (!data || data.length === 0) return;

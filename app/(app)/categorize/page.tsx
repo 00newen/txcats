@@ -40,7 +40,7 @@ import {
   LucideIcon,
   X,
 } from 'lucide-react';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { decryptData, encryptData } from '@/src/crypto/encryption';
 import { TransactionRow } from '@/src/features/upload/types';
 import { CategoryItem } from '@/src/features/categories/types';
@@ -106,17 +106,25 @@ export default function CategorizePage() {
   const [history, setHistory] = useState<{ tx: TransactionRow & { id: string; uniqueId: string }; index: number }[]>(
     [],
   );
+  const [recentCategorized, setRecentCategorized] = useState<
+    { tx: TransactionRow & { id: string; uniqueId: string }; categoryId: string; categorizedAt: number }[]
+  >([]);
+  const [displayTx, setDisplayTx] = useState<(TransactionRow & { id: string; uniqueId: string }) | null>(null);
+  const [txAnimationPhase, setTxAnimationPhase] = useState<'idle' | 'out' | 'in'>('idle');
+  const txAnimationTimeoutRef = useRef<number | null>(null);
 
   // Category Navigation & Search
   const [navPath, setNavPath] = useState<CategoryItem[]>([]);
   const [catSearch, setCatSearch] = useState('');
   const currentParentId = navPath[navPath.length - 1]?.id || null;
+  const currentParentCategory = navPath[navPath.length - 1] || null;
 
   // Pattern Dialog State
   const [isPatternDialogOpen, setIsPatternDialogOpen] = useState(false);
   const [patternMatchText, setPatternMatchText] = useState('');
   const [patternCategory, setPatternCategory] = useState('');
   const [patternMatchType, setPatternMatchType] = useState<'contains' | 'exact' | 'regex'>('contains');
+  const emitTxCountChanged = () => window.dispatchEvent(new CustomEvent('tx-count-changed'));
 
   // Load Data
   const loadData = useCallback(async () => {
@@ -207,9 +215,53 @@ export default function CategorizePage() {
   }, [currentIndex]);
 
   const currentTx = transactions[currentIndex];
+  const txForDisplay = displayTx || currentTx || null;
+  const isTxAnimating = txAnimationPhase !== 'idle';
+
+  useEffect(() => {
+    return () => {
+      if (txAnimationTimeoutRef.current) {
+        window.clearTimeout(txAnimationTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentTx) {
+      setDisplayTx(null);
+      setTxAnimationPhase('idle');
+      return;
+    }
+
+    if (!displayTx) {
+      setDisplayTx(currentTx);
+      setTxAnimationPhase('in');
+      if (txAnimationTimeoutRef.current) {
+        window.clearTimeout(txAnimationTimeoutRef.current);
+      }
+      txAnimationTimeoutRef.current = window.setTimeout(() => setTxAnimationPhase('idle'), 220);
+      return;
+    }
+
+    if (displayTx.id === currentTx.id) return;
+
+    setTxAnimationPhase('out');
+    if (txAnimationTimeoutRef.current) {
+      window.clearTimeout(txAnimationTimeoutRef.current);
+    }
+
+    txAnimationTimeoutRef.current = window.setTimeout(() => {
+      setDisplayTx(currentTx);
+      setTxAnimationPhase('in');
+      txAnimationTimeoutRef.current = window.setTimeout(() => setTxAnimationPhase('idle'), 220);
+    }, 170);
+  }, [currentTx?.id, currentTx, displayTx]);
 
   const handleCategorize = async (categoryId: string) => {
     if (!currentTx || !dek) return;
+    // Always reset category navigation to top-level for the next transaction.
+    setNavPath([]);
+    setCatSearch('');
     setHistory((prev) => [{ tx: currentTx, index: currentIndex }, ...prev].slice(0, 50));
 
     try {
@@ -227,12 +279,13 @@ export default function CategorizePage() {
 
       const newTxs = transactions.filter((t) => t.id !== currentTx.id);
       setTransactions(newTxs);
+      setRecentCategorized((prev) =>
+        [{ tx: currentTx, categoryId, categorizedAt: Date.now() }, ...prev.filter((item) => item.tx.id !== currentTx.id)].slice(0, 10),
+      );
       if (currentIndex >= newTxs.length && currentIndex > 0) {
         setCurrentIndex(newTxs.length - 1);
       }
-      window.dispatchEvent(new CustomEvent('tx-count-changed'));
-      setCatSearch('');
-      setNavPath([]);
+      emitTxCountChanged();
       toast({ title: 'Categorized', description: updatedTx.description });
     } catch (e) {
       console.error(e);
@@ -266,9 +319,14 @@ export default function CategorizePage() {
         next.splice(lastIndex, 0, lastTx);
         return next;
       });
+      setRecentCategorized((prev) => {
+        const removeIndex = prev.findIndex((item) => item.tx.id === lastTx.id);
+        if (removeIndex < 0) return prev;
+        return prev.filter((_, idx) => idx !== removeIndex);
+      });
       setHistory((prev) => prev.slice(1));
       setCurrentIndex(lastIndex);
-      window.dispatchEvent(new CustomEvent('tx-count-changed'));
+      emitTxCountChanged();
       toast({ title: 'Undo successful', description: 'Transaction restored to its previous position.' });
     } catch (e) {
       console.error(e);
@@ -358,6 +416,7 @@ export default function CategorizePage() {
       });
       setIsPatternDialogOpen(false);
       await loadData();
+      emitTxCountChanged();
     } catch (e) {
       console.error(e);
       toast({ title: 'Error saving rule', variant: 'destructive' });
@@ -436,7 +495,7 @@ export default function CategorizePage() {
     );
   }
 
-  const suggestedId = currentTx ? matchTransaction(currentTx, patterns) : undefined;
+  const suggestedId = txForDisplay ? matchTransaction(txForDisplay, patterns) : undefined;
   const suggestedCat = suggestedId ? categories.find((c) => c.id === suggestedId) : undefined;
 
   return (
@@ -474,12 +533,9 @@ export default function CategorizePage() {
           )}
 
           {currentTx && (
-            <div
-              className={cn('max-w-7xl mx-auto transition-all duration-500', isLoading && 'opacity-50 grayscale-[0.5]')}
-              key={currentTx.id}
-            >
+            <div className={cn('max-w-7xl mx-auto transition-all duration-500', isLoading && 'opacity-50 grayscale-[0.5]')}>
               <Card className='shadow-2xl border-t-4 border-t-primary relative overflow-hidden'>
-                <CardContent className='pt-10 pb-8 px-4 sm:px-8 space-y-10'>
+                <CardContent className={cn('pt-10 pb-8 px-4 sm:px-8 space-y-10', isTxAnimating && 'pointer-events-none')}>
                   {/* Internal Navigation & Header */}
                   <div className='relative flex flex-col items-center text-center px-12'>
                     {/* Left Arrow */}
@@ -492,16 +548,22 @@ export default function CategorizePage() {
                       <ChevronLeft className='w-8 h-8' />
                     </Button>
 
-                    <div className='space-y-2'>
+                    <div
+                      className={cn(
+                        'space-y-2 transition-all duration-200 ease-out',
+                        txAnimationPhase === 'out' && 'opacity-0 -translate-y-2',
+                        txAnimationPhase !== 'out' && 'opacity-100 translate-y-0',
+                      )}
+                    >
                       <div className='text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]'>
-                        {currentTx.bookingDate}
+                        {txForDisplay?.bookingDate}
                       </div>
                       <h2 className='text-3xl md:text-4xl font-black leading-tight tracking-tighter'>
-                        {currentTx.merchantOrName || currentTx.description}
+                        {txForDisplay?.merchantOrName || txForDisplay?.description}
                       </h2>
-                      {currentTx.merchantOrName && (
+                      {txForDisplay?.merchantOrName && (
                         <p className='text-xs text-muted-foreground italic line-clamp-1 max-w-lg mx-auto opacity-70'>
-                          {currentTx.description}
+                          {txForDisplay.description}
                         </p>
                       )}
                     </div>
@@ -517,16 +579,23 @@ export default function CategorizePage() {
                     </Button>
                   </div>
 
-                  <div className='flex flex-col items-center space-y-2'>
+                  <div
+                    className={cn(
+                      'flex flex-col items-center space-y-2 transition-all duration-200 ease-out',
+                      txAnimationPhase === 'out' && 'opacity-0 translate-y-2',
+                      txAnimationPhase !== 'out' && 'opacity-100 translate-y-0',
+                    )}
+                  >
                     <div
                       className={cn(
                         'text-5xl font-black font-mono tracking-tighter',
-                        parseAmount(currentTx.amount) < 0 ? 'text-red-500' : 'text-green-600',
+                        parseAmount(txForDisplay?.amount || '0') < 0 ? 'text-red-500' : 'text-green-600',
                       )}
                     >
                       {(() => {
-                        const parsed = parseAmount(currentTx.amount);
-                        if (isNaN(parsed)) return currentTx.amount;
+                        if (!txForDisplay) return '';
+                        const parsed = parseAmount(txForDisplay.amount);
+                        if (isNaN(parsed)) return txForDisplay.amount;
                         return `${parsed >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsed), amountFormat)}`;
                       })()}
                     </div>
@@ -604,6 +673,20 @@ export default function CategorizePage() {
                     )}
 
                     <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3'>
+                      {currentParentCategory && !catSearch && (
+                        <button
+                          onClick={() => handleCategorize(currentParentCategory.id)}
+                          className='flex items-center gap-3 p-3 rounded-xl border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-all text-left group'
+                        >
+                          <div className='w-10 h-10 rounded-lg flex items-center justify-center bg-primary/15 text-primary transition-colors'>
+                            <Check className='w-5 h-5' />
+                          </div>
+                          <div className='min-w-0'>
+                            <p className='text-sm font-bold truncate'>Assign to {currentParentCategory.name}</p>
+                            <p className='text-[10px] text-muted-foreground'>Use parent category directly</p>
+                          </div>
+                        </button>
+                      )}
                       {navPath.length > 0 && !catSearch && (
                         <button
                           onClick={() => setNavPath((prev) => prev.slice(0, -1))}
@@ -753,6 +836,49 @@ export default function CategorizePage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {recentCategorized.length > 0 && (
+          <Card className='shadow-md border-muted/60'>
+            <CardContent className='pt-5 pb-4 px-4 sm:px-6 space-y-4'>
+              <div className='flex items-center justify-between'>
+                <h3 className='text-sm font-black uppercase tracking-wider'>Recently Categorized</h3>
+                <span className='text-[11px] text-muted-foreground'>Last {recentCategorized.length} items</span>
+              </div>
+              <div className='space-y-2'>
+                {recentCategorized.map((item) => {
+                  const categoryName = categories.find((cat) => cat.id === item.categoryId)?.name || 'Unknown';
+                  const parsedAmount = parseAmount(item.tx.amount);
+                  const formattedAmount =
+                    isNaN(parsedAmount) || !isFinite(parsedAmount)
+                      ? item.tx.amount
+                      : `${parsedAmount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsedAmount), amountFormat)}`;
+
+                  return (
+                    <div key={`${item.tx.id}-${item.categorizedAt}`} className='flex items-center justify-between gap-3 rounded-lg border px-3 py-2'>
+                      <div className='min-w-0'>
+                        <p className='text-sm font-semibold truncate'>{item.tx.merchantOrName || item.tx.description}</p>
+                        <p className='text-[11px] text-muted-foreground truncate'>{item.tx.bookingDate}</p>
+                      </div>
+                      <div className='flex items-center gap-2 shrink-0'>
+                        <Badge variant='secondary' className='font-medium'>
+                          {categoryName}
+                        </Badge>
+                        <span
+                          className={cn(
+                            'text-sm font-mono font-bold',
+                            parseAmount(item.tx.amount) < 0 ? 'text-red-500' : 'text-green-600',
+                          )}
+                        >
+                          {formattedAmount}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </ProtectedVaultContent>
   );

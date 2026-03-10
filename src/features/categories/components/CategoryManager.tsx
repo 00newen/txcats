@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import { CategoryItem } from '../types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import {
     Plus, Trash2, Pencil, Home, Plug, Utensils, Car, HeartPulse, User, Film,
     ShoppingBag, Repeat, Plane, Wallet, ArrowLeftRight, Layers,
     Briefcase, Coffee, Gift, Shirt, Hammer, Book, Smartphone, PiggyBank,
-    LucideIcon, ChevronDown
+    LucideIcon, ChevronDown, GripVertical
 } from 'lucide-react';
 import { useVault } from '@/src/components/auth/VaultProvider';
 import { useToast } from '@/hooks/use-toast';
@@ -80,6 +80,10 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
     const [editIcon, setEditIcon] = useState('');
     const [editParentId, setEditParentId] = useState<string>('');
     const [isEditIconSelectOpen, setIsEditIconSelectOpen] = useState(false);
+    const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
+    const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null);
+    const [dragOverCategoryId, setDragOverCategoryId] = useState<string | null>(null);
+    const [isOverRootDropZone, setIsOverRootDropZone] = useState(false);
 
     const handleAdd = async () => {
         if (!dek || !newName.trim()) return;
@@ -211,8 +215,272 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         setIsEditIconSelectOpen(false);
     };
 
+    const categoriesById = useMemo(() => {
+        return new Map(categories.map((cat) => [cat.id, cat]));
+    }, [categories]);
+
+    const { rootCategories, childrenByParentId } = useMemo(() => {
+        const nextChildrenByParentId = new Map<string, CategoryItem[]>();
+        const nextRoots: CategoryItem[] = [];
+
+        for (const cat of categories) {
+            if (cat.parentId && categoriesById.has(cat.parentId)) {
+                const children = nextChildrenByParentId.get(cat.parentId) || [];
+                children.push(cat);
+                nextChildrenByParentId.set(cat.parentId, children);
+            } else {
+                nextRoots.push(cat);
+            }
+        }
+
+        const sortByName = (a: CategoryItem, b: CategoryItem) => a.name.localeCompare(b.name);
+        nextRoots.sort(sortByName);
+        for (const children of nextChildrenByParentId.values()) {
+            children.sort(sortByName);
+        }
+
+        return {
+            rootCategories: nextRoots,
+            childrenByParentId: nextChildrenByParentId,
+        };
+    }, [categories, categoriesById]);
+
+    useEffect(() => {
+        const validIds = new Set(categories.map((c) => c.id));
+        setExpandedCategoryIds((prev) => {
+            const next = new Set<string>();
+            prev.forEach((id) => {
+                if (validIds.has(id)) next.add(id);
+            });
+            return next;
+        });
+    }, [categories]);
+
+    const renderCategoryNode = (cat: CategoryItem, depth: number, path: Set<string>): ReactNode => {
+        if (path.has(cat.id)) return null;
+
+        const Icon = ICON_MAP[cat.icon] || Layers;
+        const children = childrenByParentId.get(cat.id) || [];
+        const hasChildren = children.length > 0;
+        const isExpanded = hasChildren && expandedCategoryIds.has(cat.id);
+        const nextPath = new Set(path);
+        nextPath.add(cat.id);
+        const parentName = cat.parentId ? categoriesById.get(cat.parentId)?.name : null;
+
+        const isDropTarget = dragOverCategoryId === cat.id && draggingCategoryId !== cat.id;
+
+        return (
+            <div key={cat.id} className="space-y-2">
+                <div
+                    className={cn(
+                        "flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/50 transition-all group shadow-sm hover:shadow-md",
+                        isDropTarget && "ring-2 ring-primary/60 border-primary/50 bg-primary/5"
+                    )}
+                    style={{ marginLeft: `${depth * 18}px` }}
+                    onDragOver={(e) => handleDragOverCategory(e, cat.id)}
+                    onDragEnter={(e) => handleDragOverCategory(e, cat.id)}
+                    onDragLeave={() => setDragOverCategoryId((prev) => (prev === cat.id ? null : prev))}
+                    onDrop={(e) => handleDropOnCategory(e, cat.id)}
+                >
+                    <div className="flex items-center gap-2 min-w-0">
+                        <button
+                            type="button"
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, cat.id)}
+                            onDragEnd={handleDragEnd}
+                            className={cn(
+                                "h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors cursor-grab active:cursor-grabbing shrink-0",
+                                isSubmitting && "pointer-events-none opacity-40"
+                            )}
+                            title="Drag to re-parent"
+                            disabled={isSubmitting}
+                        >
+                            <GripVertical className="w-4 h-4" />
+                        </button>
+                        <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-lg shrink-0"
+                            style={{ backgroundColor: cat.color }}
+                        >
+                            <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="font-semibold text-sm truncate">{cat.name}</span>
+                                {hasChildren && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+                                        {children.length}
+                                    </span>
+                                )}
+                            </div>
+                            {parentName && (
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">
+                                    Child of {parentName}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                        {hasChildren && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all"
+                                onClick={() =>
+                                    setExpandedCategoryIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(cat.id)) next.delete(cat.id);
+                                        else next.add(cat.id);
+                                        return next;
+                                    })
+                                }
+                                title={isExpanded ? "Collapse children" : "Expand children"}
+                            >
+                                <ChevronDown className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-180")} />
+                            </Button>
+                        )}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all"
+                            onClick={() => openEdit(cat)}
+                        >
+                            <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive transition-all"
+                            onClick={() => handleDelete(cat.id)}
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </Button>
+                    </div>
+                </div>
+
+                {isExpanded && (
+                    <div className="border-l border-dashed border-border/70 ml-4 pl-1">
+                        {children.map((child) => renderCategoryNode(child, depth + 1, nextPath))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     const SelectedIcon = ICON_MAP[newIcon] || Layers;
     const EditSelectedIcon = ICON_MAP[editIcon] || Layers;
+
+    const isDescendantOf = (candidateDescendantId: string, ancestorId: string): boolean => {
+        const visited = new Set<string>();
+        let currentId: string | undefined = candidateDescendantId;
+
+        while (currentId) {
+            if (currentId === ancestorId) return true;
+            if (visited.has(currentId)) break;
+            visited.add(currentId);
+            currentId = categoriesById.get(currentId)?.parentId;
+        }
+
+        return false;
+    };
+
+    const updateCategoryParent = async (categoryId: string, nextParentId?: string) => {
+        if (!dek) return;
+        const existing = categoriesById.get(categoryId);
+        if (!existing) return;
+
+        const currentParent = existing.parentId || undefined;
+        if (currentParent === nextParentId) return;
+
+        setIsSubmitting(true);
+        try {
+            const updatedItem: CategoryItem = { ...existing, parentId: nextParentId };
+            const aad = new TextEncoder().encode('category');
+            const { ciphertextBase64, ivBase64 } = await encryptData(updatedItem, dek, aad);
+            const aadBase64 = btoa(String.fromCharCode(...aad));
+
+            await saveEncryptedItems('category', [{
+                uniqueId: updatedItem.id,
+                ciphertextBase64,
+                ivBase64,
+                aadBase64
+            }], true);
+
+            onRefresh();
+        } catch (e) {
+            console.error(e);
+            toast({ title: "Update Failed", description: "Could not update parent relationship.", variant: "destructive" });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const getDraggingCategoryId = (e: DragEvent<HTMLElement>): string | null => {
+        const fromEvent = e.dataTransfer.getData('application/x-txcats-category-id');
+        return fromEvent || draggingCategoryId;
+    };
+
+    const handleDragStart = (e: DragEvent<HTMLElement>, categoryId: string) => {
+        if (isSubmitting) {
+            e.preventDefault();
+            return;
+        }
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-txcats-category-id', categoryId);
+        setDraggingCategoryId(categoryId);
+    };
+
+    const handleDragEnd = () => {
+        setDraggingCategoryId(null);
+        setDragOverCategoryId(null);
+        setIsOverRootDropZone(false);
+    };
+
+    const handleDragOverCategory = (e: DragEvent<HTMLElement>, categoryId: string) => {
+        if (!draggingCategoryId || categoryId === draggingCategoryId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setIsOverRootDropZone(false);
+        setDragOverCategoryId(categoryId);
+    };
+
+    const handleDropOnCategory = async (e: DragEvent<HTMLElement>, targetCategoryId: string) => {
+        e.preventDefault();
+        const draggedId = getDraggingCategoryId(e);
+        handleDragEnd();
+        if (!draggedId || draggedId === targetCategoryId) return;
+
+        if (isDescendantOf(targetCategoryId, draggedId)) {
+            toast({
+                title: "Invalid Move",
+                description: "A category cannot be moved under itself or one of its descendants.",
+                variant: "destructive"
+            });
+            return;
+        }
+
+        await updateCategoryParent(draggedId, targetCategoryId);
+        setExpandedCategoryIds((prev) => {
+            const next = new Set(prev);
+            next.add(targetCategoryId);
+            return next;
+        });
+    };
+
+    const handleDragOverRoot = (e: DragEvent<HTMLElement>) => {
+        if (!draggingCategoryId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverCategoryId(null);
+        setIsOverRootDropZone(true);
+    };
+
+    const handleDropOnRoot = async (e: DragEvent<HTMLElement>) => {
+        e.preventDefault();
+        const draggedId = getDraggingCategoryId(e);
+        handleDragEnd();
+        if (!draggedId) return;
+        await updateCategoryParent(draggedId, undefined);
+    };
 
     return (
         <Card>
@@ -321,44 +589,22 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                     </Button>
                 </div>
 
-                {/* List */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {categories.map(cat => {
-                        const Icon = ICON_MAP[cat.icon] || Layers;
-                        return (
-                            <div key={cat.id} className="flex items-center justify-between p-4 border rounded-xl hover:bg-muted/50 transition-all group shadow-sm hover:shadow-md">
-                                <div className="flex items-center gap-4">
-                                    <div
-                                        className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg"
-                                        style={{ backgroundColor: cat.color }}
-                                    >
-                                        <Icon className="w-5 h-5" />
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="font-semibold text-sm">{cat.name}</span>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-9 w-9 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all"
-                                        onClick={() => openEdit(cat)}
-                                    >
-                                        <Pencil className="w-5 h-5" />
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive transition-all"
-                                        onClick={() => handleDelete(cat.id)}
-                                    >
-                                        <Trash2 className="w-5 h-5" />
-                                    </Button>
-                                </div>
-                            </div>
-                        );
-                    })}
+                {/* Tree List */}
+                <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
+                    <div
+                        className={cn(
+                            "rounded-lg border border-dashed px-3 py-2 text-[11px] font-semibold text-muted-foreground",
+                            draggingCategoryId ? "transition-colors" : "",
+                            isOverRootDropZone && "border-primary bg-primary/5 text-primary"
+                        )}
+                        onDragOver={handleDragOverRoot}
+                        onDragEnter={handleDragOverRoot}
+                        onDragLeave={() => setIsOverRootDropZone(false)}
+                        onDrop={handleDropOnRoot}
+                    >
+                        Drop here to move category to top level
+                    </div>
+                    {rootCategories.map((cat) => renderCategoryNode(cat, 0, new Set<string>()))}
                     {categories.length === 0 && (
                         <div className="col-span-full text-center py-12 text-muted-foreground text-sm italic border-2 border-dashed rounded-xl">
                             No categories yet. Use "Seed Defaults" or add one above.
@@ -402,7 +648,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                             </button>
 
                             {isEditIconSelectOpen && (
-                                <div className="absolute top-full left-0 mt-1 w-full max-h-48 overflow-auto rounded-md border p-1 text-popover-foreground shadow-md z-[60]">
+                                <div className="absolute top-full left-0 mt-1 w-full max-h-48 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md z-[60]">
                                     {Object.entries(ICON_MAP).map(([name, Icon]) => (
                                         <button
                                             key={name}
