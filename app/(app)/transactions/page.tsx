@@ -13,6 +13,7 @@ import { CategoryItem } from '@/features/categories/types';
 import { updateEncryptedItem } from '@/server/actions/transactions';
 import { findMatchingPattern, matchTransaction } from '@/features/patterns/utils/engine';
 import { PatternItem } from '@/features/patterns/types';
+import { describePatternCondition, getPrimaryCondition } from '@/features/patterns/utils/model';
 import { saveEncryptedItems } from '@/server/actions/vaultItems';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -571,7 +572,7 @@ export default function TransactionsPage() {
 
         {/* Detail Modal */}
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-          <DialogContent className='max-w-2xl max-h-[90vh] overflow-y-auto'>
+          <DialogContent className='max-w-[calc(100vw-2rem)] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto'>
             <DialogHeader>
               <DialogTitle className='text-2xl font-black'>Transaction Details</DialogTitle>
               <DialogDescription>Full structural and metadata view from your secure vault.</DialogDescription>
@@ -612,6 +613,8 @@ export default function TransactionsPage() {
                     {(() => {
                       const pattern = findMatchingPattern(selectedTx, patterns);
                       if (pattern) {
+                        const primaryCondition = getPrimaryCondition(pattern);
+                        const { fieldLabel, operatorLabel, valueLabel } = describePatternCondition(primaryCondition);
                         return (
                           <div className='pt-2 border-t border-primary/10'>
                             <div className='flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase mb-2'>
@@ -622,12 +625,16 @@ export default function TransactionsPage() {
                               <div>
                                 <p className='text-[10px] text-muted-foreground uppercase font-bold'>Match String</p>
                                 <p className='font-mono bg-background px-2 py-1 rounded border mt-1'>
-                                  {pattern.matchString}
+                                  {valueLabel}
                                 </p>
                               </div>
                               <div>
                                 <p className='text-[10px] text-muted-foreground uppercase font-bold'>Match Type</p>
-                                <p className='capitalize mt-1'>{pattern.matchType}</p>
+                                <p className='capitalize mt-1'>{operatorLabel}</p>
+                              </div>
+                              <div>
+                                <p className='text-[10px] text-muted-foreground uppercase font-bold'>Match Field</p>
+                                <p className='mt-1'>{fieldLabel}</p>
                               </div>
                             </div>
                           </div>
@@ -660,6 +667,24 @@ export default function TransactionsPage() {
                           Account ID
                         </h4>
                         <div className='text-sm font-mono'>{selectedTx.accountId}</div>
+                      </div>
+                    )}
+
+                    {selectedTx.sender && (
+                      <div>
+                        <h4 className='text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5'>
+                          Sender
+                        </h4>
+                        <div className='text-sm'>{selectedTx.sender}</div>
+                      </div>
+                    )}
+
+                    {selectedTx.recipient && (
+                      <div>
+                        <h4 className='text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5'>
+                          Recipient
+                        </h4>
+                        <div className='text-sm'>{selectedTx.recipient}</div>
                       </div>
                     )}
                   </div>

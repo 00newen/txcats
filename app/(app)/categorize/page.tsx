@@ -17,14 +17,23 @@ import {
   Search,
   ArrowLeft,
   Layers,
+  Plus,
   X,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { TransactionRow } from '@/features/upload/types';
 import { CategoryItem } from '@/features/categories/types';
-import { PatternItem } from '@/features/patterns/types';
+import {
+  PATTERN_MATCH_FIELDS,
+  PATTERN_MATCH_FIELD_LABELS,
+  PatternItem,
+  type PatternCondition,
+  type PatternConditionMode,
+} from '@/features/patterns/types';
 import { updateEncryptedItem } from '@/server/actions/transactions';
 import { matchTransaction, matchesPattern } from '@/features/patterns/utils/engine';
+import { createPatternFromConditions, createSingleConditionPattern } from '@/features/patterns/utils/model';
+import { PATTERN_AMOUNT_OPERATORS, PATTERN_TEXT_OPERATORS, type PatternAmountOperator, type PatternTextOperator } from '@/features/patterns/types';
 import { saveEncryptedItems } from '@/server/actions/vaultItems';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -47,6 +56,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+type PatternDraftCondition = {
+  id: string;
+  field: (typeof PATTERN_MATCH_FIELDS)[number];
+  operator: PatternTextOperator | PatternAmountOperator;
+  value: string;
+  secondaryValue: string;
+};
 
 export default function CategorizePage() {
   const { dek } = useVault();
@@ -78,8 +95,15 @@ export default function CategorizePage() {
   // Pattern Dialog State
   const [isPatternDialogOpen, setIsPatternDialogOpen] = useState(false);
   const [patternMatchText, setPatternMatchText] = useState('');
+  const [patternMatchSecondaryValue, setPatternMatchSecondaryValue] = useState('');
   const [patternCategory, setPatternCategory] = useState('');
-  const [patternMatchType, setPatternMatchType] = useState<'contains' | 'exact' | 'regex'>('contains');
+  const [patternMatchType, setPatternMatchType] = useState<PatternTextOperator | PatternAmountOperator>('contains');
+  const [patternMatchField, setPatternMatchField] = useState<(typeof PATTERN_MATCH_FIELDS)[number]>('descriptionOrName');
+  const [isPatternAdvancedOpen, setIsPatternAdvancedOpen] = useState(false);
+  const [patternConditionMode, setPatternConditionMode] = useState<PatternConditionMode>('all');
+  const [additionalPatternConditions, setAdditionalPatternConditions] = useState<PatternDraftCondition[]>([]);
+  const isAmountPatternField = patternMatchField === 'amount';
+  const amountPatternNeedsSecondaryValue = patternMatchType === 'between';
   const emitTxCountChanged = () => window.dispatchEvent(new CustomEvent('tx-count-changed'));
 
   // Load Data
@@ -241,25 +265,99 @@ export default function CategorizePage() {
     else setCurrentIndex(0);
   };
 
+  const buildDraftConditionPattern = useCallback(
+    (draft: PatternDraftCondition, id: string) =>
+      draft.field === 'amount'
+        ? createSingleConditionPattern({
+            id,
+            categoryId: patternCategory || '',
+            field: 'amount',
+            operator: draft.operator as PatternAmountOperator,
+            value: draft.value,
+            secondaryValue: draft.secondaryValue,
+            priority: 0,
+          })
+        : createSingleConditionPattern({
+            id,
+            categoryId: patternCategory || '',
+            field: draft.field,
+            operator: draft.operator as PatternTextOperator,
+            value: draft.value,
+            priority: 0,
+          }),
+    [patternCategory],
+  );
+
+  const buildPatternFromDialogState = useCallback(
+    (id: string): PatternItem | null => {
+      const primaryDraft: PatternDraftCondition = {
+        id: 'primary',
+        field: patternMatchField,
+        operator: patternMatchType,
+        value: patternMatchText,
+        secondaryValue: patternMatchSecondaryValue,
+      };
+
+      if (!primaryDraft.value.trim()) return null;
+      if (primaryDraft.field === 'amount' && primaryDraft.operator === 'between' && !primaryDraft.secondaryValue.trim()) return null;
+
+      if (!isPatternAdvancedOpen || additionalPatternConditions.length === 0) {
+        return buildDraftConditionPattern(primaryDraft, id);
+      }
+
+      if (primaryDraft.field === 'descriptionOrName') return null;
+
+      const drafts = [primaryDraft, ...additionalPatternConditions];
+      const conditions: PatternCondition[] = [];
+
+      for (const draft of drafts) {
+        if (!draft.value.trim()) return null;
+        if (draft.field === 'descriptionOrName') return null;
+        if (draft.field === 'amount' && draft.operator === 'between' && !draft.secondaryValue.trim()) return null;
+        const pattern = buildDraftConditionPattern(draft, `${id}-${draft.id}`);
+        conditions.push(...pattern.conditions);
+      }
+
+      return createPatternFromConditions({
+        id,
+        categoryId: patternCategory,
+        conditionMode: patternConditionMode,
+        conditions,
+        priority: 0,
+      });
+    },
+    [
+      additionalPatternConditions,
+      buildDraftConditionPattern,
+      isPatternAdvancedOpen,
+      patternCategory,
+      patternConditionMode,
+      patternMatchField,
+      patternMatchSecondaryValue,
+      patternMatchText,
+      patternMatchType,
+    ],
+  );
+
   const openPatternDialog = (categoryId: string) => {
     if (!currentTx) return;
     setPatternMatchText(currentTx.description);
     setPatternCategory(categoryId);
     setPatternMatchType('contains');
+    setPatternMatchField('descriptionOrName');
+    setPatternMatchSecondaryValue('');
+    setIsPatternAdvancedOpen(false);
+    setPatternConditionMode('all');
+    setAdditionalPatternConditions([]);
     setIsPatternDialogOpen(true);
   };
 
   const handleSavePattern = async () => {
-    if (!dek || !patternMatchText.trim() || !patternCategory) return;
+    if (!dek || !patternCategory) return;
     setIsLoading(true);
     try {
-      const newPattern: PatternItem = {
-        id: crypto.randomUUID(),
-        matchString: patternMatchText.trim(),
-        categoryId: patternCategory,
-        matchType: patternMatchType,
-        priority: 0,
-      };
+      const newPattern = buildPatternFromDialogState(crypto.randomUUID());
+      if (!newPattern) return;
 
       const patternPayload = await encryptResourceItem('pattern', newPattern, dek, newPattern.id);
       unwrap(await saveEncryptedItems('pattern', [patternPayload]));
@@ -291,18 +389,40 @@ export default function CategorizePage() {
     }
   };
 
-  const affectedCount = useMemo(() => {
-    if (!patternMatchText.trim()) return 0;
-    return transactions.filter((transaction) =>
-      matchesPattern(transaction, {
-        id: 'preview',
-        matchString: patternMatchText,
-        categoryId: patternCategory || '',
-        matchType: patternMatchType,
-        priority: 0,
-      }),
-    ).length;
-  }, [patternMatchText, patternMatchType, transactions]);
+  const affectedTransactions = useMemo(() => {
+    const previewPattern = buildPatternFromDialogState('preview');
+    if (!previewPattern) return [];
+    return transactions.filter((transaction) => matchesPattern(transaction, previewPattern));
+  }, [buildPatternFromDialogState, transactions]);
+
+  const affectedCount = affectedTransactions.length;
+  const canSavePattern = !!buildPatternFromDialogState('validate');
+
+  const canUseAdvancedConditions = patternMatchField !== 'descriptionOrName';
+
+  const addAdvancedCondition = () => {
+    setAdditionalPatternConditions((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        field: 'description',
+        operator: 'contains',
+        value: '',
+        secondaryValue: '',
+      },
+    ]);
+  };
+
+  const updateAdvancedCondition = (
+    id: string,
+    updater: (condition: PatternDraftCondition) => PatternDraftCondition,
+  ) => {
+    setAdditionalPatternConditions((prev) => prev.map((condition) => (condition.id === id ? updater(condition) : condition)));
+  };
+
+  const removeAdvancedCondition = (id: string) => {
+    setAdditionalPatternConditions((prev) => prev.filter((condition) => condition.id !== id));
+  };
 
   const displayedCategories = useMemo(() => {
     if (catSearch.trim()) {
@@ -414,11 +534,23 @@ export default function CategorizePage() {
                       <h2 className='text-3xl md:text-4xl font-black leading-tight tracking-tighter'>
                         {txForDisplay?.merchantOrName || txForDisplay?.description}
                       </h2>
-                      {txForDisplay?.merchantOrName && (
-                        <p className='text-xs text-muted-foreground italic line-clamp-1 max-w-lg mx-auto opacity-70'>
-                          {txForDisplay.description}
-                        </p>
-                      )}
+                      <div className='mx-auto grid w-full max-w-3xl grid-cols-1 gap-2 pt-2 sm:grid-cols-2'>
+                        {[
+                          { label: 'Account', value: txForDisplay?.accountId },
+                          { label: 'Name', value: txForDisplay?.merchantOrName },
+                          { label: 'Description', value: txForDisplay?.description },
+                          { label: 'Sender', value: txForDisplay?.sender },
+                          { label: 'Recipient', value: txForDisplay?.recipient },
+                          { label: 'Counterparty', value: txForDisplay?.counterparty },
+                        ]
+                          .filter((item) => item.value)
+                          .map((item) => (
+                            <div key={item.label} className='rounded-xl border bg-muted/30 px-3 py-2 text-left shadow-sm'>
+                              <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>{item.label}</p>
+                              <p className='truncate text-sm font-medium'>{item.value}</p>
+                            </div>
+                          ))}
+                      </div>
                     </div>
 
                     {/* Right Arrow (Skip) */}
@@ -607,55 +739,124 @@ export default function CategorizePage() {
         </div>
 
         <Dialog open={isPatternDialogOpen} onOpenChange={setIsPatternDialogOpen}>
-          <DialogContent className='sm:max-w-md'>
+          <DialogContent className='flex max-h-[90vh] max-w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-2xl lg:max-w-3xl'>
             <DialogHeader>
               <DialogTitle className='flex items-center gap-2'>
                 <Sparkles className='w-5 h-5 text-primary' /> Create Rule
               </DialogTitle>
               <DialogDescription>Automatically categorize matches.</DialogDescription>
             </DialogHeader>
-            <div className='space-y-4 py-4'>
+            <div className='space-y-4 overflow-y-auto py-4 pr-1'>
               <div className='space-y-2'>
-                <Label>Match Text</Label>
+                <Label>{isAmountPatternField ? 'Amount' : 'Match Text'}</Label>
                 <div className='flex gap-2'>
                   <Input
                     value={patternMatchText}
                     onChange={(e) => setPatternMatchText(e.target.value)}
-                    placeholder='Search term...'
+                    placeholder={isAmountPatternField ? 'e.g. 2500' : 'Search term...'}
                     className='font-mono text-sm'
                   />
                   <div className='flex shrink-0 gap-1'>
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      className='text-[10px] px-2 h-9'
-                      onClick={() => setPatternMatchText(currentTx?.description || '')}
-                      title='Use full description'
-                    >
-                      Desc
-                    </Button>
-                    {currentTx?.merchantOrName && (
+                    {!isAmountPatternField && (
                       <Button
                         variant='outline'
                         size='sm'
                         className='text-[10px] px-2 h-9'
-                        onClick={() => setPatternMatchText(currentTx.merchantOrName || '')}
+                        onClick={() => {
+                          setPatternMatchText(currentTx?.description || '');
+                          setPatternMatchField('description');
+                        }}
+                        title='Use full description'
+                      >
+                        Desc
+                      </Button>
+                    )}
+                    {!isAmountPatternField && currentTx?.merchantOrName && (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        className='text-[10px] px-2 h-9'
+                        onClick={() => {
+                          setPatternMatchText(currentTx.merchantOrName || '');
+                          setPatternMatchField('name');
+                        }}
                         title='Use merchant name'
                       >
                         Name
+                      </Button>
+                    )}
+                    {!isAmountPatternField && currentTx?.sender && (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        className='text-[10px] px-2 h-9'
+                        onClick={() => {
+                          setPatternMatchText(currentTx.sender || '');
+                          setPatternMatchField('sender');
+                        }}
+                        title='Use sender'
+                      >
+                        Sender
+                      </Button>
+                    )}
+                    {!isAmountPatternField && currentTx?.recipient && (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        className='text-[10px] px-2 h-9'
+                        onClick={() => {
+                          setPatternMatchText(currentTx.recipient || '');
+                          setPatternMatchField('recipient');
+                        }}
+                        title='Use recipient'
+                      >
+                        Recipient
+                      </Button>
+                    )}
+                    {isAmountPatternField && currentTx && (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        className='text-[10px] px-2 h-9'
+                        onClick={() => setPatternMatchText(currentTx.amount)}
+                        title='Use transaction amount'
+                      >
+                        Amt
                       </Button>
                     )}
                   </div>
                 </div>
               </div>
               <div className='space-y-2'>
-                <Label>Match Mode</Label>
+                <Label>Field</Label>
+                <select
+                  className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background'
+                  value={patternMatchField}
+                  onChange={(e) => {
+                    const nextField = e.target.value as (typeof PATTERN_MATCH_FIELDS)[number];
+                    setPatternMatchField(nextField);
+                    setPatternMatchType(nextField === 'amount' ? 'eq' : 'contains');
+                    setPatternMatchSecondaryValue('');
+                  }}
+                >
+                  {PATTERN_MATCH_FIELDS.map((field) => (
+                    <option key={field} value={field}>
+                      {PATTERN_MATCH_FIELD_LABELS[field]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className='space-y-2'>
+                <Label>Operator</Label>
                 <div className='flex bg-muted/80 p-1 rounded-xl gap-1'>
-                  {(['contains', 'exact', 'regex'] as const).map((m) => (
+                  {(isAmountPatternField ? PATTERN_AMOUNT_OPERATORS : PATTERN_TEXT_OPERATORS).map((m) => (
                     <button
                       key={m}
                       type='button'
-                      onClick={() => setPatternMatchType(m)}
+                      onClick={() => {
+                        setPatternMatchType(m);
+                        if (m !== 'between') setPatternMatchSecondaryValue('');
+                      }}
                       className={cn(
                         'flex-1 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border border-transparent',
                         patternMatchType === m
@@ -663,10 +864,156 @@ export default function CategorizePage() {
                           : 'text-muted-foreground hover:bg-background/40 hover:text-foreground',
                       )}
                     >
-                      {m}
+                      {m === 'lt' ? 'Less Than' : m === 'gt' ? 'Greater Than' : m === 'eq' ? 'Exactly' : m}
                     </button>
                   ))}
                 </div>
+              </div>
+              {amountPatternNeedsSecondaryValue && (
+                <div className='space-y-2'>
+                  <Label>And Amount</Label>
+                  <Input
+                    value={patternMatchSecondaryValue}
+                    onChange={(e) => setPatternMatchSecondaryValue(e.target.value)}
+                    placeholder='e.g. 3500'
+                    className='font-mono text-sm'
+                  />
+                </div>
+              )}
+              <div className='space-y-3 rounded-xl border bg-muted/20 p-4'>
+                <div className='flex items-center justify-between gap-3'>
+                  <div>
+                    <p className='text-sm font-bold'>Advanced Rule</p>
+                    <p className='text-xs text-muted-foreground'>Add extra conditions without leaving the current transaction.</p>
+                  </div>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => {
+                      setIsPatternAdvancedOpen((prev) => !prev);
+                      if (isPatternAdvancedOpen) {
+                        setAdditionalPatternConditions([]);
+                        setPatternConditionMode('all');
+                      }
+                    }}
+                  >
+                    {isPatternAdvancedOpen ? 'Hide' : 'Show'}
+                  </Button>
+                </div>
+                {isPatternAdvancedOpen && (
+                  <div className='space-y-4'>
+                    <div className='space-y-2'>
+                      <Label>Rule Logic</Label>
+                      <select
+                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background'
+                        value={patternConditionMode}
+                        onChange={(e) => setPatternConditionMode(e.target.value as PatternConditionMode)}
+                        disabled={!canUseAdvancedConditions}
+                      >
+                        <option value='all'>Match all conditions</option>
+                        <option value='any'>Match any condition</option>
+                      </select>
+                    </div>
+                    {!canUseAdvancedConditions && (
+                      <p className='text-xs text-muted-foreground'>
+                        Change the primary field from "Description or Name" to a specific field before adding more conditions.
+                      </p>
+                    )}
+                    {additionalPatternConditions.map((condition, index) => {
+                      const isAmountCondition = condition.field === 'amount';
+                      const needsSecondaryValue = condition.operator === 'between';
+
+                      return (
+                        <div key={condition.id} className='space-y-3 rounded-lg border bg-background p-3'>
+                          <div className='flex items-center justify-between'>
+                            <p className='text-xs font-bold uppercase tracking-wider text-muted-foreground'>Condition {index + 2}</p>
+                            <Button type='button' variant='ghost' size='icon' onClick={() => removeAdvancedCondition(condition.id)}>
+                              <X className='h-4 w-4' />
+                            </Button>
+                          </div>
+                          <div className='grid gap-3 md:grid-cols-3'>
+                            <div className='space-y-2'>
+                              <Label>Field</Label>
+                              <select
+                                className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background'
+                                value={condition.field}
+                                onChange={(e) =>
+                                  updateAdvancedCondition(condition.id, (current) => ({
+                                    ...current,
+                                    field: e.target.value as PatternDraftCondition['field'],
+                                    operator: e.target.value === 'amount' ? 'eq' : 'contains',
+                                    secondaryValue: '',
+                                  }))
+                                }
+                              >
+                                {PATTERN_MATCH_FIELDS.filter((field) => field !== 'descriptionOrName').map((field) => (
+                                  <option key={field} value={field}>
+                                    {PATTERN_MATCH_FIELD_LABELS[field]}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className='space-y-2'>
+                              <Label>Operator</Label>
+                              <select
+                                className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background'
+                                value={condition.operator}
+                                onChange={(e) =>
+                                  updateAdvancedCondition(condition.id, (current) => ({
+                                    ...current,
+                                    operator: e.target.value as PatternDraftCondition['operator'],
+                                    secondaryValue: e.target.value === 'between' ? current.secondaryValue : '',
+                                  }))
+                                }
+                              >
+                                {(isAmountCondition ? PATTERN_AMOUNT_OPERATORS : PATTERN_TEXT_OPERATORS).map((operator) => (
+                                  <option key={operator} value={operator}>
+                                    {operator === 'lt'
+                                      ? 'Less Than'
+                                      : operator === 'gt'
+                                        ? 'Greater Than'
+                                        : operator === 'eq'
+                                          ? 'Exactly'
+                                          : operator === 'between'
+                                            ? 'Between'
+                                            : operator}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className='space-y-2'>
+                              <Label>{isAmountCondition ? 'Amount' : 'Value'}</Label>
+                              <Input
+                                value={condition.value}
+                                onChange={(e) =>
+                                  updateAdvancedCondition(condition.id, (current) => ({ ...current, value: e.target.value }))
+                                }
+                                placeholder={isAmountCondition ? 'e.g. 2500' : 'Enter value'}
+                              />
+                            </div>
+                          </div>
+                          {needsSecondaryValue && (
+                            <div className='space-y-2'>
+                              <Label>And Amount</Label>
+                              <Input
+                                value={condition.secondaryValue}
+                                onChange={(e) =>
+                                  updateAdvancedCondition(condition.id, (current) => ({ ...current, secondaryValue: e.target.value }))
+                                }
+                                placeholder='e.g. 3500'
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <Button type='button' variant='outline' size='sm' onClick={addAdvancedCondition} disabled={!canUseAdvancedConditions}>
+                      <Plus className='mr-2 h-4 w-4' />
+                      Add Condition
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className='bg-primary/5 rounded-xl p-4 border border-primary/10 flex items-center justify-between'>
                 <div>
@@ -674,16 +1021,68 @@ export default function CategorizePage() {
                   <p className='text-sm font-black'>{affectedCount} items</p>
                 </div>
                 <div className='text-right'>
+                  <p className='text-[10px] font-bold text-muted-foreground uppercase'>Field</p>
+                  <p className='text-sm font-bold'>{PATTERN_MATCH_FIELD_LABELS[patternMatchField]}</p>
+                </div>
+                <div className='text-right'>
                   <p className='text-[10px] font-bold text-muted-foreground uppercase'>Target</p>
                   <p className='text-sm font-bold'>{categories.find((c) => c.id === patternCategory)?.name}</p>
                 </div>
               </div>
+              <div className='space-y-2'>
+                <div className='flex items-center justify-between'>
+                  <Label>Matching Transactions</Label>
+                  {affectedCount > 0 && <span className='text-[11px] text-muted-foreground'>{affectedCount} shown below</span>}
+                </div>
+                <div className='max-h-64 overflow-y-auto rounded-xl border bg-muted/20'>
+                  {affectedTransactions.length === 0 ? (
+                    <div className='px-4 py-6 text-sm text-muted-foreground'>No uncategorized transactions match this rule.</div>
+                  ) : (
+                    <div className='divide-y'>
+                      {affectedTransactions.map((tx) => {
+                        const parsedAmount = parseAmount(tx.amount);
+                        const formattedAmount =
+                          isNaN(parsedAmount) || !isFinite(parsedAmount)
+                            ? tx.amount
+                            : `${parsedAmount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsedAmount), amountFormat)}`;
+
+                        return (
+                          <div key={tx.id} className='flex items-center justify-between gap-3 px-4 py-3'>
+                            <div className='min-w-0'>
+                              <p className='truncate text-sm font-semibold'>{tx.merchantOrName || tx.description}</p>
+                              <p className='truncate text-[11px] text-muted-foreground'>
+                                {tx.bookingDate}
+                                {tx.merchantOrName ? ` • ${tx.description}` : ''}
+                              </p>
+                              {(tx.sender || tx.recipient) && (
+                                <p className='truncate text-[11px] text-muted-foreground'>
+                                  {tx.sender ? `Sender: ${tx.sender}` : ''}
+                                  {tx.sender && tx.recipient ? ' • ' : ''}
+                                  {tx.recipient ? `Recipient: ${tx.recipient}` : ''}
+                                </p>
+                              )}
+                            </div>
+                            <span
+                              className={cn(
+                                'shrink-0 text-sm font-mono font-bold',
+                                parsedAmount < 0 ? 'text-red-500' : 'text-green-600',
+                              )}
+                            >
+                              {formattedAmount}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-            <DialogFooter className='gap-2 sm:gap-0'>
+            <DialogFooter className='border-t pt-4 gap-2 sm:gap-0'>
               <Button variant='ghost' onClick={() => setIsPatternDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSavePattern} disabled={isLoading || !patternMatchText.trim()}>
+              <Button onClick={handleSavePattern} disabled={isLoading || !canSavePattern}>
                 {isLoading && <Loader2 className='w-4 h-4 mr-2 animate-spin' />}Save Rule
               </Button>
             </DialogFooter>

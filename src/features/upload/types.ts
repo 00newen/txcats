@@ -7,6 +7,8 @@ export type TransactionRow = {
   // Recommended/Optional
   accountId?: string;
   valueDate?: string;
+  sender?: string;
+  recipient?: string;
   counterparty?: string;
   currency?: string;     // ISO 3-letter code, default config if missing
   bankTxId?: string;
@@ -27,6 +29,8 @@ export type CsvMapping = {
   amount: string;
   description: string;
   accountId?: string; // Optional columns can be unmapped (undefined)
+  sender?: string;
+  recipient?: string;
   valueDate?: string;
   counterparty?: string;
   merchantOrName?: string;

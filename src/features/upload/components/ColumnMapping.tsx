@@ -38,8 +38,10 @@ export function ColumnMapping({ headers, initialMapping, onConfirm, onCancel }: 
         { key: 'amount', label: 'Amount', required: true },
         { key: 'merchantOrName', label: 'Merchant / Payee Name', required: false, description: "Display name for the transaction" },
         { key: 'description', label: 'Memo / Description', required: true, description: "Detailed transaction text" },
+        { key: 'sender', label: 'Sender', required: false, description: 'Originator or payer name/account' },
+        { key: 'recipient', label: 'Recipient', required: false, description: 'Beneficiary or receiving party' },
         { key: 'accountId', label: 'Account ID / IBAN', required: false },
-        { key: 'counterparty', label: 'Counterparty IBAN', required: false },
+        { key: 'counterparty', label: 'Counterparty (Legacy)', required: false, description: 'Fallback generic counterparty field' },
         { key: 'bankTxId', label: 'Bank Transaction ID', required: false },
     ];
 

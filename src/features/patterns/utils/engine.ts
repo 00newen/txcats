@@ -1,86 +1,117 @@
-import { PatternItem } from '../types';
+import { type PatternCondition, type PatternItem, type PatternTextField } from '../types';
 import { TransactionRow } from '../../upload/types';
+import { parseAmount } from '@/lib/amount';
+
+function getTransactionTextValue(transaction: TransactionRow, field: PatternTextField): string {
+  switch (field) {
+    case 'description':
+      return transaction.description;
+    case 'name':
+      return transaction.merchantOrName || '';
+    case 'sender':
+      return transaction.sender || '';
+    case 'recipient':
+      return transaction.recipient || '';
+    case 'counterparty':
+      return transaction.counterparty || '';
+  }
+}
+
+function matchesTextCondition(transaction: TransactionRow, condition: PatternCondition): boolean {
+  if (condition.type !== 'text') return false;
+  const candidate = getTransactionTextValue(transaction, condition.field);
+  const normalizedCandidate = candidate.toLowerCase();
+  const normalizedValue = condition.value.toLowerCase();
+
+  if (condition.operator === 'contains') {
+    return normalizedCandidate.includes(normalizedValue);
+  }
+
+  if (condition.operator === 'exact') {
+    return normalizedCandidate === normalizedValue;
+  }
+
+  try {
+    const regex = new RegExp(condition.value, 'i');
+    return regex.test(candidate);
+  } catch (e) {
+    console.error('Invalid regex in pattern condition:', condition, e);
+    return false;
+  }
+}
+
+function matchesAmountCondition(transaction: TransactionRow, condition: PatternCondition): boolean {
+  if (condition.type !== 'amount') return false;
+
+  const transactionAmount = parseAmount(transaction.amount);
+  const ruleAmount = parseAmount(condition.value);
+
+  if (!isFinite(transactionAmount) || !isFinite(ruleAmount)) return false;
+
+  if (condition.operator === 'lt') return transactionAmount < ruleAmount;
+  if (condition.operator === 'gt') return transactionAmount > ruleAmount;
+  if (condition.operator === 'eq') return transactionAmount === ruleAmount;
+
+  const secondaryAmount = parseAmount(condition.secondaryValue || '');
+  if (!isFinite(secondaryAmount)) return false;
+
+  const min = Math.min(ruleAmount, secondaryAmount);
+  const max = Math.max(ruleAmount, secondaryAmount);
+  return transactionAmount >= min && transactionAmount <= max;
+}
+
+function matchesNormalizedPattern(transaction: TransactionRow, pattern: PatternItem): boolean {
+  if (pattern.conditions.length === 0) return false;
+
+  const results = pattern.conditions.map((condition) =>
+    condition.type === 'text' ? matchesTextCondition(transaction, condition) : matchesAmountCondition(transaction, condition),
+  );
+  return pattern.conditionMode === 'any' ? results.some(Boolean) : results.every(Boolean);
+}
 
 export function matchesPattern(transaction: TransactionRow, pattern: PatternItem): boolean {
-    const description = transaction.description.toLowerCase();
-    const merchant = (transaction.merchantOrName || '').toLowerCase();
-    const matchStr = pattern.matchString.toLowerCase();
-
-    if (pattern.matchType === 'contains') {
-        return description.includes(matchStr) || merchant.includes(matchStr);
-    }
-
-    if (pattern.matchType === 'exact') {
-        return description === matchStr || merchant === matchStr;
-    }
-
-    if (pattern.matchType === 'regex') {
-        try {
-            const regex = new RegExp(pattern.matchString, 'i');
-            return regex.test(transaction.description) || (transaction.merchantOrName ? regex.test(transaction.merchantOrName) : false);
-        } catch (e) {
-            console.error("Invalid regex in pattern:", pattern.id, e);
-            return false;
-        }
-    }
-
-    return false;
+  return matchesNormalizedPattern(transaction, pattern);
 }
 
-/**
- * Matches a single transaction against a list of patterns.
- * Returns the matched categoryId or undefined.
- */
-export function matchTransaction(
-    transaction: TransactionRow, 
-    patterns: PatternItem[]
-): string | undefined {
-    // Sort patterns by priority (highest first)
-    const sortedPatterns = [...patterns].sort((a, b) => b.priority - a.priority);
-
-    for (const pattern of sortedPatterns) {
-        if (matchesPattern(transaction, pattern)) {
-            return pattern.categoryId;
-        }
-    }
-
-    return undefined;
+export function sortPatternsByPriority(patterns: PatternItem[]): PatternItem[] {
+  return [...patterns].sort((a, b) => b.priority - a.priority);
 }
 
-/**
- * Similar to matchTransaction but returns the full pattern object.
- */
-export function findMatchingPattern(
-    transaction: TransactionRow,
-    patterns: PatternItem[]
-): PatternItem | undefined {
-    const sortedPatterns = [...patterns].sort((a, b) => b.priority - a.priority);
-
-    for (const pattern of sortedPatterns) {
-        if (matchesPattern(transaction, pattern)) {
-            return pattern;
-        }
+function matchTransactionFromSorted(transaction: TransactionRow, patterns: PatternItem[]): string | undefined {
+  for (const pattern of patterns) {
+    if (matchesPattern(transaction, pattern)) {
+      return pattern.categoryId;
     }
-    return undefined;
+  }
+
+  return undefined;
 }
 
-/**
- * Processes a list of transactions against patterns.
- * Returns updated transactions with categoryId assigned if matched.
- */
-export function applyPatterns(
-    transactions: TransactionRow[], 
-    patterns: PatternItem[]
-): TransactionRow[] {
-    return transactions.map(tx => {
-        // Only auto-categorize if not already categorized or if we want to overwrite
-        // For now, let's only assign if empty
-        if (!tx.categoryId) {
-            const matchedCategoryId = matchTransaction(tx, patterns);
-            if (matchedCategoryId) {
-                return { ...tx, categoryId: matchedCategoryId };
-            }
-        }
-        return tx;
-    });
+export function matchTransaction(transaction: TransactionRow, patterns: PatternItem[]): string | undefined {
+  return matchTransactionFromSorted(transaction, sortPatternsByPriority(patterns));
+}
+
+export function findMatchingPattern(transaction: TransactionRow, patterns: PatternItem[]): PatternItem | undefined {
+  const sortedPatterns = sortPatternsByPriority(patterns);
+
+  for (const pattern of sortedPatterns) {
+    if (matchesPattern(transaction, pattern)) {
+      return pattern;
+    }
+  }
+  return undefined;
+}
+
+export function applyPatterns(transactions: TransactionRow[], patterns: PatternItem[]): TransactionRow[] {
+  const sortedPatterns = sortPatternsByPriority(patterns);
+
+  return transactions.map((tx) => {
+    if (!tx.categoryId) {
+      const matchedCategoryId = matchTransactionFromSorted(tx, sortedPatterns);
+      if (matchedCategoryId) {
+        return { ...tx, categoryId: matchedCategoryId };
+      }
+    }
+    return tx;
+  });
 }

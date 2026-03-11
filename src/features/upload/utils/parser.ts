@@ -59,6 +59,8 @@ export function generateHeuristicMapping(headers: string[]): CsvMapping {
     amount: findHeader(headers, ['amount', 'betrag', 'value', 'umsatz']) || '',
     description: findHeader(headers, ['description', 'memo', 'payee', 'text', 'usage', 'details']) || '',
     accountId: findHeader(headers, ['account', 'iban', 'auftraggeberkonto']) || undefined,
+    sender: findHeader(headers, ['sender', 'from', 'payer', 'auftraggeber', 'originator']) || undefined,
+    recipient: findHeader(headers, ['recipient', 'to', 'beneficiary', 'beguenstigter', 'empfaenger']) || undefined,
     counterparty: findHeader(headers, ['counterparty', 'recipient', 'sender', 'beguenstigter', 'empfaenger']) || undefined,
     merchantOrName: findHeader(headers, ['name', 'merchant', 'partner', 'company']) || undefined,
     bankTxId: findHeader(headers, ['id', 'reference', 'ref']) || undefined,
@@ -86,6 +88,8 @@ export function parseCsv(file: File): Promise<ParseResult> {
              amount: row[mapping.amount] || '0',
              description: row[mapping.description] || 'Unknown',
              accountId: mapping.accountId ? row[mapping.accountId] : undefined,
+             sender: mapping.sender ? row[mapping.sender] : undefined,
+             recipient: mapping.recipient ? row[mapping.recipient] : undefined,
              counterparty: mapping.counterparty ? row[mapping.counterparty] : undefined,
              merchantOrName: mapping.merchantOrName ? row[mapping.merchantOrName] : undefined,
              bankTxId: mapping.bankTxId ? row[mapping.bankTxId] : undefined,
@@ -121,6 +125,8 @@ export function mapRows(rawData: Record<string, string>[], mapping: CsvMapping):
          amount: row[mapping.amount] || '0',
          description: row[mapping.description] || '',
          accountId: mapping.accountId ? row[mapping.accountId] : undefined,
+         sender: mapping.sender ? row[mapping.sender] : undefined,
+         recipient: mapping.recipient ? row[mapping.recipient] : undefined,
          counterparty: mapping.counterparty ? row[mapping.counterparty] : undefined,
          merchantOrName: mapping.merchantOrName ? row[mapping.merchantOrName] : undefined,
          bankTxId: mapping.bankTxId ? row[mapping.bankTxId] : undefined,
@@ -132,4 +138,3 @@ export function mapRows(rawData: Record<string, string>[], mapping: CsvMapping):
      };
   });
 }
-
