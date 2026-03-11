@@ -1,9 +1,9 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
+import { useVault } from '@/auth/VaultProvider';
 import { useUser } from '@clerk/nextjs';
-import { UnlockScreen } from '@/src/components/auth/UnlockScreen';
-import { PassphraseSetup } from '@/src/components/auth/PassphraseSetup';
+import { UnlockScreen } from '@/auth/UnlockScreen';
+import { PassphraseSetup } from '@/auth/PassphraseSetup';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Lock, ShieldAlert } from 'lucide-react';

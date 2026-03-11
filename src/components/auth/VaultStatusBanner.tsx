@@ -1,6 +1,6 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
+import { useVault } from '@/auth/VaultProvider';
 import { useUser } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import { PlusCircle } from 'lucide-react';

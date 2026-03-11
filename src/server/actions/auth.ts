@@ -1,20 +1,29 @@
 'use server';
 
-import { createUserMeta, getUserMeta } from '@/src/db/queries/userMeta';
-import { createVault } from '@/src/db/queries/vaults';
+import { createUserMeta, getUserMeta } from '@/db/queries/userMeta';
+import { createVault } from '@/db/queries/vaults';
 import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
+import { fail, ok, type ActionResult } from '@/lib/actions/result';
+import type { UserMeta } from '@/types/database';
 
-export async function checkUserSetup() {
+export type CheckUserSetupResult = {
+  isSetup: boolean
+  userId: string | null
+  meta: UserMeta | null
+  vaultId: string | null
+}
+
+export async function checkUserSetup(): Promise<CheckUserSetupResult> {
   const { userId } = await auth();
-  if (!userId) return { isSetup: false, userId: null };
+  if (!userId) return { isSetup: false, userId: null, meta: null, vaultId: null };
 
-  const meta = await getUserMeta(userId);
+  const meta = (await getUserMeta(userId)) || null;
   
   // Also fetch primary vault if setup
   let vaultId = null;
   if (meta) {
-    const { getVaultsByUserId } = await import('@/src/db/queries/vaults');
+    const { getVaultsByUserId } = await import('@/db/queries/vaults');
     const userVaults = await getVaultsByUserId(userId);
     if (userVaults.length > 0) {
       vaultId = userVaults[0].id;
@@ -28,9 +37,9 @@ export async function completeSetup(payload: {
   salt: string;
   wrappedDEK: string;
   verificationBlob: string;
-}) {
+}): Promise<ActionResult<{ vaultId: string }>> {
   const { userId } = await auth();
-  if (!userId) throw new Error('Unauthorized');
+  if (!userId) return fail('UNAUTHORIZED', 'Unauthorized');
 
   // 1. Create User Meta
   await createUserMeta(
@@ -44,5 +53,5 @@ export async function completeSetup(payload: {
   const vault = await createVault(userId, 'Personal Vault');
 
   revalidatePath('/');
-  return { success: true, vaultId: vault.id };
+  return ok({ vaultId: vault.id });
 }

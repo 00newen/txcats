@@ -1,32 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
-import { UploadArea } from '@/src/features/upload/components/UploadArea';
-import { TransactionPreview } from '@/src/features/upload/components/TransactionPreview';
-import { ColumnMapping } from '@/src/features/upload/components/ColumnMapping';
-import { ParseResult, TransactionRow, CsvMapping } from '@/src/features/upload/types';
-import { mapRows } from '@/src/features/upload/utils/parser';
+import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
+import { UploadArea } from '@/features/upload/components/UploadArea';
+import { TransactionPreview } from '@/features/upload/components/TransactionPreview';
+import { ColumnMapping } from '@/features/upload/components/ColumnMapping';
+import { ParseResult, TransactionRow, CsvMapping } from '@/features/upload/types';
+import { mapRows } from '@/features/upload/utils/parser';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { CheckCircle2, AlertCircle, Tag, Files, ArrowRight, RotateCcw, LayoutDashboard, Heart } from 'lucide-react';
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { encryptData } from '@/src/crypto/encryption';
-import { saveEncryptedTransactions } from '@/src/server/actions/vaultItems';
-import { fetchPatterns } from '@/src/server/actions/patterns';
-import { fetchCategories } from '@/src/server/actions/categories';
-import { fetchMappingProfiles } from '@/src/server/actions/mappings';
-import { applyPatterns } from '@/src/features/patterns/utils/engine';
-import { fetchTransactions } from '@/src/server/actions/transactions';
-import { decryptData } from '@/src/crypto/encryption';
-import { PatternItem } from '@/src/features/patterns/types';
-import { CategoryItem } from '@/src/features/categories/types';
-import { MappingProfile } from '@/src/features/upload/types';
-import { getHeadersFingerprint } from '@/src/features/upload/utils/parser';
-import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
+import { useVault } from '@/auth/VaultProvider';
+import { encryptData } from '@/crypto/encryption';
+import { saveEncryptedTransactions } from '@/server/actions/vaultItems';
+import { applyPatterns } from '@/features/patterns/utils/engine';
+import { PatternItem } from '@/features/patterns/types';
+import { CategoryItem } from '@/features/categories/types';
+import { MappingProfile } from '@/features/upload/types';
+import { getHeadersFingerprint } from '@/features/upload/utils/parser';
+import { saveEncryptedItems } from '@/server/actions/vaultItems';
 import { useEffect, useCallback } from 'react';
+import { loadCategories, loadMappingProfiles, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { unwrap } from '@/lib/actions/result';
 
 export default function UploadPage() {
   // State for flow control
@@ -54,54 +51,17 @@ export default function UploadPage() {
   const loadMetaData = useCallback(async () => {
     if (!dek) return;
     try {
-      // Fetch Categories
-      const catRes = await fetchCategories();
-      if (catRes.success && catRes.items) {
-        const decCats: CategoryItem[] = [];
-        for (const item of catRes.items) {
-          try {
-            const aad = new TextEncoder().encode('category');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decCats.push(plain as CategoryItem);
-          } catch {}
-        }
-        setCategories(decCats);
-      }
+      const [categoryResult, patternResult, mappingResult, transactionResult] = await Promise.all([
+        loadCategories(dek),
+        loadPatterns(dek),
+        loadMappingProfiles(dek),
+        loadTransactions(dek),
+      ]);
 
-      // Fetch Patterns
-      const patRes = await fetchPatterns();
-      if (patRes.success && patRes.items) {
-        const decPatterns: PatternItem[] = [];
-        for (const item of patRes.items) {
-          try {
-            const aad = new TextEncoder().encode('pattern');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decPatterns.push(plain as PatternItem);
-          } catch {}
-        }
-        setPatterns(decPatterns);
-      }
-
-      // Fetch Mapping Profiles
-      const mapRes = await fetchMappingProfiles();
-      if (mapRes.success && mapRes.items) {
-        const decProfiles: MappingProfile[] = [];
-        for (const item of mapRes.items) {
-          try {
-            const aad = new TextEncoder().encode('mapping_profile');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decProfiles.push(plain as MappingProfile);
-          } catch {}
-        }
-        setMappingProfiles(decProfiles);
-      }
-
-      // Fetch Existing Transactions to identify duplicates
-      const txRes = await fetchTransactions();
-      if (txRes.success && txRes.items) {
-        const ids = new Set(txRes.items.map((item) => item.uniqueId).filter(Boolean) as string[]);
-        setExistingUniqueIds(ids);
-      }
+      setCategories(categoryResult.items as CategoryItem[]);
+      setPatterns(patternResult.items as PatternItem[]);
+      setMappingProfiles(mappingResult.items as MappingProfile[]);
+      setExistingUniqueIds(new Set(transactionResult.items.map((item) => item.uniqueId).filter(Boolean)));
     } catch (e) {
       console.error('Failed to load metadata for auto-categorization', e);
     }
@@ -179,7 +139,7 @@ export default function UploadPage() {
       const { ciphertextBase64, ivBase64 } = await encryptData(profile, dek, aad);
       const aadBase64 = btoa(String.fromCharCode(...aad));
 
-      await saveEncryptedItems(
+      unwrap(await saveEncryptedItems(
         'mapping_profile',
         [
           {
@@ -190,7 +150,7 @@ export default function UploadPage() {
           },
         ],
         true,
-      ); // Upsert
+      )); // Upsert
 
       // Update local state
       setMappingProfiles((prev) => {
@@ -272,24 +232,22 @@ export default function UploadPage() {
 
       // 2. Send to Server
       toast({ title: 'Uploading...', description: 'Securely saving encrypted data to your vault.' });
-      const response = await saveEncryptedTransactions(encryptedPayloads);
+      const response = unwrap(await saveEncryptedTransactions(encryptedPayloads));
 
-      if (response && response.success) {
-        // Calculate detailed stats for the success screen
-        const duplicates = parsedData.filter((d) => d.isDuplicate).length;
-        const categorized = parsedData.filter((d) => !d.isDuplicate && d.categoryId).length;
+      // Calculate detailed stats for the success screen
+      const duplicates = parsedData.filter((d) => d.isDuplicate).length;
+      const categorized = parsedData.filter((d) => !d.isDuplicate && d.categoryId).length;
 
-        setImportStats({
-          new: response.count,
-          duplicates,
-          categorized,
-        });
+      setImportStats({
+        new: response.count,
+        duplicates,
+        categorized,
+      });
 
-        // Notify sidebar to refresh count
-        window.dispatchEvent(new CustomEvent('tx-count-changed'));
+      // Notify sidebar to refresh count
+      window.dispatchEvent(new CustomEvent('tx-count-changed'));
 
-        setStep('success');
-      }
+      setStep('success');
     } catch (e) {
       console.error(e);
       toast({

@@ -16,10 +16,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { fetchTransactions } from '@/src/server/actions/transactions';
-import { decryptData } from '@/src/crypto/encryption';
+import { useVault } from '@/auth/VaultProvider';
 import { useEffect, useCallback } from 'react';
+import { loadTransactions } from '@/lib/vault/loaders';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -40,22 +39,8 @@ export function Sidebar() {
   const loadUncategorizedCount = useCallback(async () => {
     if (!dek) return;
     try {
-      const response = await fetchTransactions();
-      if (response.success && response.items) {
-        let count = 0;
-        for (const item of response.items) {
-          try {
-            const aadBytes = new Uint8Array(atob(item.aadBase64).split('').map(c => c.charCodeAt(0)));
-            const plaintext = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes) as any;
-            if (!plaintext.categoryId) {
-              count++;
-            }
-          } catch (e) {
-            // Decryption might fail if item is not a transaction or wrong key
-          }
-        }
-        setUncategorizedCount(count);
-      }
+      const result = await loadTransactions(dek, { uncategorizedOnly: true });
+      setUncategorizedCount(result.items.length);
     } catch (e) {
       console.error('Failed to load count', e);
     }
@@ -144,4 +129,3 @@ export function Sidebar() {
     </>
   );
 }
-

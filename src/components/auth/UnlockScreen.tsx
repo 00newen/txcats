@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { unlockVault } from '@/src/lib/auth/passphrase';
+import { unlockVault } from '@/lib/auth/passphrase';
 import { Loader2, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { UserMeta } from '@/src/types/database';
+import { UserMeta } from '@/types/database';
 
 interface UnlockScreenProps {
     userMeta: UserMeta;
@@ -92,7 +92,7 @@ export function UnlockScreen({ userMeta, onUnlock }: UnlockScreenProps) {
                                     onClick={async () => {
                                         if (confirm("Reset TRANSACTIONS only? This cannot be undone.")) {
                                             try {
-                                                const { devResetTransactions } = await import('@/src/server/actions/dev');
+                                                const { devResetTransactions } = await import('@/server/actions/dev');
                                                 await devResetTransactions();
                                                 toast({ title: "Transactions Reset", description: "All transaction data wiped." });
                                                 window.location.reload();
@@ -112,7 +112,7 @@ export function UnlockScreen({ userMeta, onUnlock }: UnlockScreenProps) {
                                     onClick={async () => {
                                         if (confirm("Reset FULL ACCOUNT? This deletes keys, vault, and data. You will need to start over.")) {
                                             try {
-                                                const { devResetFullAccount } = await import('@/src/server/actions/dev');
+                                                const { devResetFullAccount } = await import('@/server/actions/dev');
                                                 await devResetFullAccount();
                                                 toast({ title: "Account Reset", description: "Vault wiped. Refreshing..." });
                                                 window.location.reload();

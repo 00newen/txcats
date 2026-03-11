@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { UploadCloud } from 'lucide-react';
-import { ParseResult } from '@/src/features/upload/types';
+import { ParseResult } from '@/features/upload/types';
 import { useToast } from '@/hooks/use-toast';
 import { parseCsv } from '../utils/parser';
 

@@ -1,17 +1,15 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
-import { PatternManager } from '@/src/features/patterns/components/PatternManager';
-import { PatternItem } from '@/src/features/patterns/types';
-import { CategoryItem } from '@/src/features/categories/types';
+import { useVault } from '@/auth/VaultProvider';
+import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
+import { PatternManager } from '@/features/patterns/components/PatternManager';
+import { PatternItem } from '@/features/patterns/types';
+import { CategoryItem } from '@/features/categories/types';
 import { Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { decryptData } from '@/src/crypto/encryption';
-import { fetchPatterns } from '@/src/server/actions/patterns';
-import { fetchCategories } from '@/src/server/actions/categories';
 import { useUser } from '@clerk/nextjs';
 import { cn } from '@/lib/utils';
+import { loadCategories, loadPatterns } from '@/lib/vault/loaders';
 
 export default function PatternsPage() {
   const { dek } = useVault();
@@ -24,33 +22,9 @@ export default function PatternsPage() {
     if (!dek) return;
     setIsLoading(true);
     try {
-      // Fetch Categories first (needed for patterns)
-      const catRes = await fetchCategories();
-      const decCategories: CategoryItem[] = [];
-      if (catRes.success && catRes.items) {
-        for (const item of catRes.items) {
-          try {
-            const aad = new TextEncoder().encode('category');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decCategories.push(plain as CategoryItem);
-          } catch {}
-        }
-      }
-      setCategories(decCategories);
-
-      // Fetch Patterns
-      const patRes = await fetchPatterns();
-      const decPatterns: PatternItem[] = [];
-      if (patRes.success && patRes.items) {
-        for (const item of patRes.items) {
-          try {
-            const aad = new TextEncoder().encode('pattern');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decPatterns.push(plain as PatternItem);
-          } catch {}
-        }
-      }
-      setPatterns(decPatterns);
+      const [categoryResult, patternResult] = await Promise.all([loadCategories(dek), loadPatterns(dek)]);
+      setCategories(categoryResult.items as CategoryItem[]);
+      setPatterns(patternResult.items as PatternItem[]);
     } catch (e) {
       console.error(e);
     } finally {

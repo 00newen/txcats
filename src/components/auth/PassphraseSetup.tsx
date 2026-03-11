@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { preparePassphraseSetup } from '@/src/lib/auth/passphrase';
-import { completeSetup } from '@/src/server/actions/auth';
+import { preparePassphraseSetup } from '@/lib/auth/passphrase';
+import { completeSetup } from '@/server/actions/auth';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { unwrap } from '@/lib/actions/result';
 
 export function PassphraseSetup({ onComplete }: { onComplete: () => Promise<void> | void }) {
     const [passphrase, setPassphrase] = useState('');
@@ -36,13 +37,13 @@ export function PassphraseSetup({ onComplete }: { onComplete: () => Promise<void
             const { salt, wrappedDEK, verificationBlob, dek } = await preparePassphraseSetup(passphrase);
 
             // 2. Server-side storage (Create meta and vault)
-            const response = await completeSetup({ salt, wrappedDEK, verificationBlob });
+            const response = unwrap(await completeSetup({ salt, wrappedDEK, verificationBlob }));
 
-            if (response.success && response.vaultId) {
+            if (response.vaultId) {
                 // 3. Initialize Default Categories
-                const { prepareDefaultCategories } = await import('@/src/features/categories/utils/defaults');
-                const { encryptData } = await import('@/src/crypto/encryption');
-                const { saveEncryptedItems } = await import('@/src/server/actions/vaultItems');
+                const { prepareDefaultCategories } = await import('@/features/categories/utils/defaults');
+                const { encryptData } = await import('@/crypto/encryption');
+                const { saveEncryptedItems } = await import('@/server/actions/vaultItems');
 
                 const defaultCategories = await prepareDefaultCategories(response.vaultId);
                 const encryptedPayloads = await Promise.all(
@@ -59,7 +60,7 @@ export function PassphraseSetup({ onComplete }: { onComplete: () => Promise<void
                     })
                 );
 
-                await saveEncryptedItems('category', encryptedPayloads);
+                unwrap(await saveEncryptedItems('category', encryptedPayloads));
             }
 
             toast({ title: "Setup Complete", description: "Your vault is ready with default categories." });

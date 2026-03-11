@@ -9,8 +9,8 @@ import {
 } from '@clerk/nextjs'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { ThemeProvider } from '@/lib/providers/ThemeProvider';
-import { Providers } from '@/src/components/providers/Providers';
-import { VaultProvider } from '@/src/components/auth/VaultProvider';
+import { Providers } from '@/providers/Providers';
+import { VaultProvider } from '@/auth/VaultProvider';
 import { Toaster } from '@/components/ui/toaster';
 import '@/styles/globals.css';
 import { ThemeToggle } from '@/components/core/ThemeToggle';

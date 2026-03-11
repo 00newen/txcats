@@ -1,6 +1,6 @@
 'use client';
 
-import { TransactionRow } from '@/src/features/upload/types';
+import { TransactionRow } from '@/features/upload/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';

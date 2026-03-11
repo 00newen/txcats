@@ -1,41 +1,30 @@
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
-import { getVaultsByUserId } from '@/src/db/queries/vaults';
-import { getVaultItems, createVaultItemsBulk } from '@/src/db/queries/vaultItems';
-import { EncryptedPayload } from '@/src/server/actions/vaultItems'; // reuse type
+import { getVaultItems, createVaultItemsBulk } from '@/db/queries/vaultItems';
+import { EncryptedPayload } from '@/server/actions/vaultItems'; // reuse type
 import { revalidatePath } from 'next/cache';
+import { fail, ok, type ActionResult } from '@/lib/actions/result';
+import { requirePrimaryVault } from '@/server/actions/shared';
+import type { VaultItem } from '@/types/database';
 
-export async function fetchTransactions() {
-  const { userId } = await auth();
-  if (!userId) return { success: false, error: 'Unauthorized' };
+export async function fetchTransactions(): Promise<ActionResult<{ items: VaultItem[] }>> {
+  const vault = await requirePrimaryVault();
+  if (!vault.success) return vault;
 
-  // Get primary vault
-  const vaults = await getVaultsByUserId(userId);
-  if (!vaults || vaults.length === 0) {
-    return { success: false, error: 'No vault found' };
-  }
-  const primaryVault = vaults[0];
+  const items = await getVaultItems(vault.data.vaultId, 'transaction');
 
-  const items = await getVaultItems(primaryVault.id, 'transaction');
-
-  return { success: true, items };
+  return ok({ items });
 }
 
 export async function updateEncryptedItem(
     resourceType: string,
     payload: EncryptedPayload
-) {
-    const { userId } = await auth();
-    if (!userId) throw new Error('Unauthorized');
-  
-    const vaults = await getVaultsByUserId(userId);
-    if (!vaults || vaults.length === 0) throw new Error('No vault');
-    const primaryVault = vaults[0];
+) : Promise<ActionResult<null>> {
+    const vault = await requirePrimaryVault();
+    if (!vault.success) return fail(vault.code, vault.error);
 
-    // Reuse createVaultItemsBulk with upsertMode=true
     await createVaultItemsBulk([{
-        vaultId: primaryVault.id,
+        vaultId: vault.data.vaultId,
         uniqueId: payload.uniqueId,
         resourceType: resourceType,
         ciphertextBase64: payload.ciphertextBase64,
@@ -44,5 +33,5 @@ export async function updateEncryptedItem(
     }], true); // true = upsertMode
 
     revalidatePath('/transactions');
-    return { success: true };
+    return ok(null);
 }

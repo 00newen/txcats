@@ -1,22 +1,19 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
+import { useVault } from '@/auth/VaultProvider';
+import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Sparkles, Check, Calendar, Tag, Info, X, Layers } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { decryptData, encryptData } from '@/src/crypto/encryption';
-import { TransactionRow } from '@/src/features/upload/types';
-import { CategoryItem } from '@/src/features/categories/types';
-import { fetchTransactions, updateEncryptedItem } from '@/src/server/actions/transactions';
-import { fetchCategories } from '@/src/server/actions/categories';
-import { fetchPatterns } from '@/src/server/actions/patterns';
-import { matchTransaction, findMatchingPattern } from '@/src/features/patterns/utils/engine';
-import { PatternItem } from '@/src/features/patterns/types';
-import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
+import { TransactionRow } from '@/features/upload/types';
+import { CategoryItem } from '@/features/categories/types';
+import { updateEncryptedItem } from '@/server/actions/transactions';
+import { findMatchingPattern, matchTransaction } from '@/features/patterns/utils/engine';
+import { PatternItem } from '@/features/patterns/types';
+import { saveEncryptedItems } from '@/server/actions/vaultItems';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -27,15 +24,10 @@ import { useRef } from 'react';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
 import { useUser } from '@clerk/nextjs';
-
-function isDateOnly(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function normalizeCategoryFilter(value: string): string {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : 'all';
-}
+import { loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { dedupeEncryptedPayloads, encryptResourceItem } from '@/lib/vault/resources';
+import { filterTransactions, isDateOnly, normalizeCategoryFilter, normalizeDateRange } from '@/features/transactions/utils/filters';
+import { unwrap } from '@/lib/actions/result';
 
 export default function TransactionsPage() {
   const { dek } = useVault();
@@ -69,74 +61,25 @@ export default function TransactionsPage() {
   const ITEMS_PER_PAGE = 50;
 
   // Load Categories
-  const loadCategories = useCallback(async () => {
+  const loadCategoryData = useCallback(async () => {
     if (!dek) return;
-    const { success, items } = await fetchCategories();
-    if (success && items) {
-      const decrypted: CategoryItem[] = [];
-      for (const item of items) {
-        try {
-          const aad = new TextEncoder().encode('category');
-          const plain = (await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad)) as CategoryItem;
-          decrypted.push(plain);
-        } catch {}
-      }
-      setCategories(decrypted);
-    }
+    const result = await loadCategories(dek);
+    setCategories(result.items as CategoryItem[]);
   }, [dek]);
 
-  const loadPatterns = useCallback(async () => {
+  const loadPatternData = useCallback(async () => {
     if (!dek) return;
-    const { success, items } = await fetchPatterns();
-    if (success && items) {
-      const decrypted: PatternItem[] = [];
-      for (const item of items) {
-        try {
-          const aad = new TextEncoder().encode('pattern');
-          const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-          decrypted.push(plain as PatternItem);
-        } catch {}
-      }
-      setPatterns(decrypted);
-    }
+    const result = await loadPatterns(dek);
+    setPatterns(result.items as PatternItem[]);
   }, [dek]);
 
-  // Load Transactions
-  const loadTransactions = useCallback(async () => {
+  const loadTransactionData = useCallback(async () => {
     if (!dek) return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetchTransactions();
-
-      if (!response.success || !response.items) {
-        throw new Error(response.error || 'Failed to fetch');
-      }
-
-      const items = response.items;
-      const decryptedItems: (TransactionRow & { uniqueId: string; id: string })[] = [];
-
-      for (const item of items) {
-        try {
-          // Decode stored AAD
-          const aadBytes = new Uint8Array(
-            atob(item.aadBase64)
-              .split('')
-              .map((c) => c.charCodeAt(0)),
-          );
-
-          const plaintext = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes);
-          // Store ID for local state tracking and uniqueId for vault updates
-          decryptedItems.push({ ...(plaintext as TransactionRow), id: item.id, uniqueId: item.uniqueId || '' });
-        } catch (err) {
-          console.error(`Failed to decrypt item ${item.id}`, err);
-        }
-      }
-
-      // Sort by date desc
-      decryptedItems.sort((a, b) => new Date(b.bookingDate).getTime() - new Date(a.bookingDate).getTime());
-
-      setData(decryptedItems);
+      const result = await loadTransactions(dek);
+      setData(result.items);
     } catch (e) {
       setError('Could not load transactions');
       console.error(e);
@@ -147,12 +90,12 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     if (dek) {
-      Promise.all([loadCategories(), loadPatterns(), loadTransactions()]);
+      Promise.all([loadCategoryData(), loadPatternData(), loadTransactionData()]);
     } else {
       setIsLoading(false);
       setData([]);
     }
-  }, [dek, loadCategories, loadPatterns, loadTransactions]);
+  }, [dek, loadCategoryData, loadPatternData, loadTransactionData]);
 
   useEffect(() => {
     isHydratingFiltersFromUrlRef.current = true;
@@ -165,14 +108,10 @@ export default function TransactionsPage() {
     const safeStart = isDateOnly(nextStart) ? nextStart : '';
     const safeEnd = isDateOnly(nextEnd) ? nextEnd : '';
 
+    const normalizedRange = normalizeDateRange(safeStart, safeEnd);
     setCategoryFilter(safeCategory);
-    if (safeStart && safeEnd && safeStart > safeEnd) {
-      setStartDate(safeEnd);
-      setEndDate(safeStart);
-    } else {
-      setStartDate(safeStart);
-      setEndDate(safeEnd);
-    }
+    setStartDate(normalizedRange.startDate);
+    setEndDate(normalizedRange.endDate);
     setPage(1);
   }, [searchParams]);
 
@@ -250,16 +189,8 @@ export default function TransactionsPage() {
     setData(newData);
 
     try {
-      const aad = new TextEncoder().encode('transaction');
-      const { ciphertextBase64, ivBase64 } = await encryptData(updatedTx, dek, aad);
-      const aadBase64 = btoa(String.fromCharCode(...aad));
-
-      await updateEncryptedItem('transaction', {
-        uniqueId: tx.uniqueId,
-        ciphertextBase64,
-        ivBase64,
-        aadBase64,
-      });
+      const payload = await encryptResourceItem('transaction', updatedTx, dek, tx.uniqueId);
+      unwrap(await updateEncryptedItem('transaction', payload));
 
       // Notify sidebar to refresh count
       window.dispatchEvent(new CustomEvent('tx-count-changed'));
@@ -268,7 +199,7 @@ export default function TransactionsPage() {
     } catch (e) {
       console.error(e);
       toast({ title: 'Update Failed', variant: 'destructive' });
-      loadTransactions();
+      loadTransactionData();
     }
   };
 
@@ -280,7 +211,7 @@ export default function TransactionsPage() {
     const newData = [...data];
 
     try {
-      const payloads: any[] = [];
+      const payloads = [];
       for (let i = 0; i < newData.length; i++) {
         const tx = newData[i];
         if (!tx.categoryId) {
@@ -288,25 +219,14 @@ export default function TransactionsPage() {
           if (suggestedId) {
             const updatedTx = { ...tx, categoryId: suggestedId };
             newData[i] = updatedTx;
-
-            const aad = new TextEncoder().encode('transaction');
-            const { ciphertextBase64, ivBase64 } = await encryptData(updatedTx, dek, aad);
-            const aadBase64 = btoa(String.fromCharCode(...aad));
-
-            payloads.push({
-              uniqueId: tx.uniqueId,
-              ciphertextBase64,
-              ivBase64,
-              aadBase64,
-            });
+            payloads.push(await encryptResourceItem('transaction', updatedTx, dek, tx.uniqueId));
             count++;
           }
         }
       }
 
       if (payloads.length > 0) {
-        const uniquePayloads = Array.from(new Map(payloads.map((p) => [p.uniqueId, p])).values());
-        await saveEncryptedItems('transaction', uniquePayloads, true);
+        unwrap(await saveEncryptedItems('transaction', dedupeEncryptedPayloads(payloads), true));
       }
 
       setData(newData as (TransactionRow & { id: string; uniqueId: string })[]);
@@ -326,19 +246,7 @@ export default function TransactionsPage() {
   // Client-side filtering
   const filteredData = useMemo(() => {
     if (!data) return [];
-    return data.filter((tx) => {
-      // Category Filter
-      if (categoryFilter !== 'all') {
-        if (categoryFilter === 'uncategorized' && tx.categoryId) return false;
-        if (categoryFilter !== 'uncategorized' && tx.categoryId !== categoryFilter) return false;
-      }
-
-      // Date Filters
-      if (startDate && tx.bookingDate < startDate) return false;
-      if (endDate && tx.bookingDate > endDate) return false;
-
-      return true;
-    });
+    return filterTransactions(data, { categoryFilter, startDate, endDate });
   }, [data, categoryFilter, startDate, endDate]);
 
   const paginatedData = filteredData.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);

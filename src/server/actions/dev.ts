@@ -1,7 +1,7 @@
 'use server';
 
-import { db } from '@/src/db';
-import { vaults, vaultItems, userMeta } from '@/src/db/schema';
+import { db } from '@/db';
+import { vaults, vaultItems, userMeta } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';

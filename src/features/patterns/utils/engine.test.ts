@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyPatterns, findMatchingPattern, matchTransaction } from './engine';
+import { applyPatterns, findMatchingPattern, matchTransaction, matchesPattern } from './engine';
 import type { PatternItem } from '../types';
 import type { TransactionRow } from '../../upload/types';
 
@@ -48,3 +48,20 @@ test('applyPatterns only fills missing categoryId values', () => {
   assert.equal(result[1].categoryId, 'already-set');
 });
 
+test('matchesPattern handles invalid regex safely', () => {
+  const pattern: PatternItem = {
+    id: 'regex',
+    matchString: '[',
+    categoryId: 'cat-bad',
+    matchType: 'regex',
+    priority: 50,
+  };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(matchesPattern(tx(), pattern), false);
+    assert.equal(matchTransaction(tx(), [pattern]), undefined);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});

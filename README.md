@@ -46,6 +46,16 @@ The app will be available at `http://localhost:3000`
 pnpm build
 ```
 
+### Quality Checks
+
+```bash
+pnpm typecheck
+pnpm test:unit
+pnpm lint
+```
+
+`pnpm lint` enforces the project import convention: use the explicit `@/...` aliases such as `@/features`, `@/server`, `@/db`, `@/crypto`, `@/types`, `@/components`, `@/hooks`, and `@/lib`, and do not import application code through `@/src/...`.
+
 ### Start Production Server
 
 ```bash

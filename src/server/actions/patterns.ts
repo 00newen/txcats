@@ -1,43 +1,34 @@
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
-import { getVaultsByUserId } from '@/src/db/queries/vaults';
-import { getVaultItems } from '@/src/db/queries/vaultItems';
-import { db } from '@/src/db';
-import { vaultItems } from '@/src/db/schema';
+import { getVaultItems } from '@/db/queries/vaultItems';
+import { db } from '@/db';
+import { vaultItems } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
+import { fail, ok, type ActionResult } from '@/lib/actions/result';
+import { requirePrimaryVault } from '@/server/actions/shared';
+import type { VaultItem } from '@/types/database';
 
-export async function fetchPatterns() {
-  const { userId } = await auth();
-  if (!userId) return { success: false, error: 'Unauthorized' };
+export async function fetchPatterns(): Promise<ActionResult<{ items: VaultItem[] }>> {
+  const vault = await requirePrimaryVault();
+  if (!vault.success) return vault;
 
-  const vaults = await getVaultsByUserId(userId);
-  if (!vaults || vaults.length === 0) {
-    return { success: false, error: 'No vault' };
-  }
-  const primaryVault = vaults[0];
-
-  const items = await getVaultItems(primaryVault.id, 'pattern');
-  return { success: true, items };
+  const items = await getVaultItems(vault.data.vaultId, 'pattern');
+  return ok({ items });
 }
 
-export async function deletePattern(uniqueId: string) {
-    const { userId } = await auth();
-    if (!userId) return { success: false };
-
-    const vaults = await getVaultsByUserId(userId);
-    if (!vaults || vaults.length === 0) return { success: false };
-    const primaryVault = vaults[0];
+export async function deletePattern(uniqueId: string): Promise<ActionResult<null>> {
+    const vault = await requirePrimaryVault();
+    if (!vault.success) return fail(vault.code, vault.error);
 
     await db.delete(vaultItems).where(
         and(
-            eq(vaultItems.vaultId, primaryVault.id),
+            eq(vaultItems.vaultId, vault.data.vaultId),
             eq(vaultItems.resourceType, 'pattern'),
             eq(vaultItems.uniqueId, uniqueId)
         )
     );
 
     revalidatePath('/patterns');
-    return { success: true };
+    return ok(null);
 }

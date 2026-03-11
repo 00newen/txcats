@@ -1,7 +1,7 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
+import { useVault } from '@/auth/VaultProvider';
+import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,69 +17,25 @@ import {
   Search,
   ArrowLeft,
   Layers,
-  Home,
-  Plug,
-  Utensils,
-  Car,
-  HeartPulse,
-  User,
-  Film,
-  ShoppingBag,
-  Repeat,
-  Plane,
-  Wallet,
-  ArrowLeftRight,
-  Briefcase,
-  Coffee,
-  Gift,
-  Shirt,
-  Hammer,
-  Book,
-  Smartphone,
-  PiggyBank,
-  LucideIcon,
   X,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { decryptData, encryptData } from '@/src/crypto/encryption';
-import { TransactionRow } from '@/src/features/upload/types';
-import { CategoryItem } from '@/src/features/categories/types';
-import { PatternItem } from '@/src/features/patterns/types';
-import { fetchTransactions, updateEncryptedItem } from '@/src/server/actions/transactions';
-import { fetchCategories } from '@/src/server/actions/categories';
-import { fetchPatterns } from '@/src/server/actions/patterns';
-import { matchTransaction } from '@/src/features/patterns/utils/engine';
-import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
+import { TransactionRow } from '@/features/upload/types';
+import { CategoryItem } from '@/features/categories/types';
+import { PatternItem } from '@/features/patterns/types';
+import { updateEncryptedItem } from '@/server/actions/transactions';
+import { matchTransaction, matchesPattern } from '@/features/patterns/utils/engine';
+import { saveEncryptedItems } from '@/server/actions/vaultItems';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
 import { useUser } from '@clerk/nextjs';
-
-const ICON_MAP: Record<string, LucideIcon> = {
-  home: Home,
-  plug: Plug,
-  utensils: Utensils,
-  car: Car,
-  'heart-pulse': HeartPulse,
-  user: User,
-  film: Film,
-  'shopping-bag': ShoppingBag,
-  repeat: Repeat,
-  plane: Plane,
-  wallet: Wallet,
-  'arrow-left-right': ArrowLeftRight,
-  layers: Layers,
-  briefcase: Briefcase,
-  coffee: Coffee,
-  gift: Gift,
-  shirt: Shirt,
-  hammer: Hammer,
-  book: Book,
-  smartphone: Smartphone,
-  'piggy-bank': PiggyBank,
-};
+import { CATEGORY_ICON_MAP } from '@/features/categories/utils/icons';
+import { loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { dedupeEncryptedPayloads, encryptResourceItem } from '@/lib/vault/resources';
+import { unwrap } from '@/lib/actions/result';
 
 import {
   Dialog,
@@ -131,54 +87,14 @@ export default function CategorizePage() {
     if (!dek) return;
     setIsLoading(true);
     try {
-      // 1. Categories
-      const catRes = await fetchCategories();
-      const decCats: CategoryItem[] = [];
-      if (catRes.success && catRes.items) {
-        for (const item of catRes.items) {
-          try {
-            const aad = new TextEncoder().encode('category');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decCats.push(plain as CategoryItem);
-          } catch {}
-        }
-      }
-      setCategories(decCats);
-
-      // 2. Patterns
-      const patRes = await fetchPatterns();
-      const decPatterns: PatternItem[] = [];
-      if (patRes.success && patRes.items) {
-        for (const item of patRes.items) {
-          try {
-            const aad = new TextEncoder().encode('pattern');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decPatterns.push(plain as PatternItem);
-          } catch {}
-        }
-      }
-      setPatterns(decPatterns);
-
-      // 3. Transactions
-      const txRes = await fetchTransactions();
-      if (txRes.success && txRes.items) {
-        const decTxs: (TransactionRow & { id: string; uniqueId: string })[] = [];
-        for (const item of txRes.items) {
-          try {
-            const aadBytes = new Uint8Array(
-              atob(item.aadBase64)
-                .split('')
-                .map((c) => c.charCodeAt(0)),
-            );
-            const plain = (await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes)) as TransactionRow;
-            if (!plain.categoryId) {
-              decTxs.push({ ...plain, id: item.id, uniqueId: item.uniqueId || '' });
-            }
-          } catch {}
-        }
-        decTxs.sort((a, b) => new Date(b.bookingDate).getTime() - new Date(a.bookingDate).getTime());
-        setTransactions(decTxs);
-      }
+      const [categoryResult, patternResult, transactionResult] = await Promise.all([
+        loadCategories(dek),
+        loadPatterns(dek),
+        loadTransactions(dek, { uncategorizedOnly: true }),
+      ]);
+      setCategories(categoryResult.items as CategoryItem[]);
+      setPatterns(patternResult.items as PatternItem[]);
+      setTransactions(transactionResult.items);
     } catch (e) {
       console.error(e);
       toast({ title: 'Error loading data', variant: 'destructive' });
@@ -266,16 +182,8 @@ export default function CategorizePage() {
 
     try {
       const updatedTx = { ...currentTx, categoryId };
-      const aad = new TextEncoder().encode('transaction');
-      const { ciphertextBase64, ivBase64 } = await encryptData(updatedTx, dek, aad);
-      const aadBase64 = btoa(String.fromCharCode(...aad));
-
-      await updateEncryptedItem('transaction', {
-        uniqueId: currentTx.uniqueId,
-        ciphertextBase64,
-        ivBase64,
-        aadBase64,
-      });
+      const payload = await encryptResourceItem('transaction', updatedTx, dek, currentTx.uniqueId);
+      unwrap(await updateEncryptedItem('transaction', payload));
 
       const newTxs = transactions.filter((t) => t.id !== currentTx.id);
       setTransactions(newTxs);
@@ -302,16 +210,8 @@ export default function CategorizePage() {
     setIsLoading(true);
     try {
       const updatedTx = { ...lastTx, categoryId: undefined };
-      const aad = new TextEncoder().encode('transaction');
-      const { ciphertextBase64, ivBase64 } = await encryptData(updatedTx, dek, aad);
-      const aadBase64 = btoa(String.fromCharCode(...aad));
-
-      await updateEncryptedItem('transaction', {
-        uniqueId: lastTx.uniqueId,
-        ciphertextBase64,
-        ivBase64,
-        aadBase64,
-      });
+      const payload = await encryptResourceItem('transaction', updatedTx, dek, lastTx.uniqueId);
+      unwrap(await updateEncryptedItem('transaction', payload));
 
       // Restore to list exactly where it was
       setTransactions((prev) => {
@@ -361,53 +261,19 @@ export default function CategorizePage() {
         priority: 0,
       };
 
-      const aad = new TextEncoder().encode('pattern');
-      const { ciphertextBase64, ivBase64 } = await encryptData(newPattern, dek, aad);
-      const aadBase64 = btoa(String.fromCharCode(...aad));
+      const patternPayload = await encryptResourceItem('pattern', newPattern, dek, newPattern.id);
+      unwrap(await saveEncryptedItems('pattern', [patternPayload]));
 
-      await saveEncryptedItems('pattern', [
-        {
-          uniqueId: newPattern.id,
-          ciphertextBase64,
-          ivBase64,
-          aadBase64,
-        },
-      ]);
-
-      const matchingTxs = transactions.filter((tx) => {
-        const desc = tx.description.toLowerCase();
-        const merchant = (tx.merchantOrName || '').toLowerCase();
-        const match = patternMatchText.toLowerCase();
-        if (patternMatchType === 'contains') return desc.includes(match) || merchant.includes(match);
-        if (patternMatchType === 'exact') return desc === match || merchant === match;
-        if (patternMatchType === 'regex') {
-          try {
-            const regex = new RegExp(patternMatchText, 'i');
-            return regex.test(tx.description) || (tx.merchantOrName && regex.test(tx.merchantOrName));
-          } catch {
-            return false;
-          }
-        }
-        return false;
-      });
+      const matchingTxs = transactions.filter((tx) => matchesPattern(tx, newPattern));
 
       const payloads = [];
       for (const tx of matchingTxs) {
         const updatedTx = { ...tx, categoryId: patternCategory };
-        const txAad = new TextEncoder().encode('transaction');
-        const { ciphertextBase64: txCt, ivBase64: txIv } = await encryptData(updatedTx, dek, txAad);
-        const txAadB64 = btoa(String.fromCharCode(...txAad));
-        payloads.push({
-          uniqueId: tx.uniqueId,
-          ciphertextBase64: txCt,
-          ivBase64: txIv,
-          aadBase64: txAadB64,
-        });
+        payloads.push(await encryptResourceItem('transaction', updatedTx, dek, tx.uniqueId));
       }
 
       if (payloads.length > 0) {
-        const uniquePayloads = Array.from(new Map(payloads.map((p) => [p.uniqueId, p])).values());
-        await saveEncryptedItems('transaction', uniquePayloads, true);
+        unwrap(await saveEncryptedItems('transaction', dedupeEncryptedPayloads(payloads), true));
       }
 
       toast({
@@ -427,28 +293,15 @@ export default function CategorizePage() {
 
   const affectedCount = useMemo(() => {
     if (!patternMatchText.trim()) return 0;
-    const match = patternMatchText.toLowerCase();
-
-    return transactions.filter((tx) => {
-      const desc = tx.description.toLowerCase();
-      const merchant = (tx.merchantOrName || '').toLowerCase();
-
-      if (patternMatchType === 'contains') {
-        return desc.includes(match) || merchant.includes(match);
-      }
-      if (patternMatchType === 'exact') {
-        return desc === match || merchant === match;
-      }
-      if (patternMatchType === 'regex') {
-        try {
-          const regex = new RegExp(patternMatchText, 'i');
-          return regex.test(tx.description) || (tx.merchantOrName && regex.test(tx.merchantOrName));
-        } catch {
-          return false;
-        }
-      }
-      return false;
-    }).length;
+    return transactions.filter((transaction) =>
+      matchesPattern(transaction, {
+        id: 'preview',
+        matchString: patternMatchText,
+        categoryId: patternCategory || '',
+        matchType: patternMatchType,
+        priority: 0,
+      }),
+    ).length;
   }, [patternMatchText, patternMatchType, transactions]);
 
   const displayedCategories = useMemo(() => {
@@ -699,7 +552,7 @@ export default function CategorizePage() {
                         </button>
                       )}
                       {displayedCategories.map((cat) => {
-                        const Icon = ICON_MAP[cat.icon] || Layers;
+                        const Icon = CATEGORY_ICON_MAP[cat.icon] || Layers;
                         const hasChildren = categories.some((c) => c.parentId === cat.id);
                         return (
                           <div

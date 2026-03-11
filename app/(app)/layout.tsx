@@ -1,5 +1,5 @@
 import { Sidebar } from '@/components/core/Sidebar';
-import { VaultStatusBanner } from '@/src/components/auth/VaultStatusBanner';
+import { VaultStatusBanner } from '@/auth/VaultStatusBanner';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (

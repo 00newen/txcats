@@ -7,17 +7,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-    Plus, Trash2, Pencil, Home, Plug, Utensils, Car, HeartPulse, User, Film,
-    ShoppingBag, Repeat, Plane, Wallet, ArrowLeftRight, Layers,
-    Briefcase, Coffee, Gift, Shirt, Hammer, Book, Smartphone, PiggyBank,
-    LucideIcon, ChevronDown, GripVertical
+    Plus, Trash2, Pencil, Layers, ChevronDown, GripVertical
 } from 'lucide-react';
-import { useVault } from '@/src/components/auth/VaultProvider';
+import { useVault } from '@/auth/VaultProvider';
 import { useToast } from '@/hooks/use-toast';
-import { encryptData } from '@/src/crypto/encryption';
-import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
-import { deleteCategory } from '@/src/server/actions/categories';
+import { saveEncryptedItems } from '@/server/actions/vaultItems';
+import { deleteCategory } from '@/server/actions/categories';
 import { cn } from '@/lib/utils';
+import { encryptResourceItem } from '@/lib/vault/resources';
+import { unwrap } from '@/lib/actions/result';
+import { CATEGORY_ICON_MAP } from '@/features/categories/utils/icons';
+import { buildCategoryTree, isDescendantCategory } from '@/features/categories/utils/tree';
 import {
     Dialog,
     DialogContent,
@@ -31,30 +31,6 @@ interface CategoryManagerProps {
     categories: CategoryItem[];
     onRefresh: () => void;
 }
-
-const ICON_MAP: Record<string, LucideIcon> = {
-    'home': Home,
-    'plug': Plug,
-    'utensils': Utensils,
-    'car': Car,
-    'heart-pulse': HeartPulse,
-    'user': User,
-    'film': Film,
-    'shopping-bag': ShoppingBag,
-    'repeat': Repeat,
-    'plane': Plane,
-    'wallet': Wallet,
-    'arrow-left-right': ArrowLeftRight,
-    'layers': Layers,
-    'briefcase': Briefcase,
-    'coffee': Coffee,
-    'gift': Gift,
-    'shirt': Shirt,
-    'hammer': Hammer,
-    'book': Book,
-    'smartphone': Smartphone,
-    'piggy-bank': PiggyBank,
-};
 
 const PRESET_COLORS = [
     '#2563EB', '#0EA5E9', '#16A34A', '#F97316', '#DC2626', '#9333EA', '#DB2777',
@@ -98,18 +74,8 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                 parentId: newParentId || undefined
             };
 
-            // Encrypt
-            const aad = new TextEncoder().encode('category');
-            const { ciphertextBase64, ivBase64 } = await encryptData(newItem, dek, aad);
-            const aadBase64 = btoa(String.fromCharCode(...aad));
-
-            // Save
-            await saveEncryptedItems('category', [{
-                uniqueId: newItem.id,
-                ciphertextBase64,
-                ivBase64,
-                aadBase64
-            }]);
+            const payload = await encryptResourceItem('category', newItem, dek, newItem.id);
+            unwrap(await saveEncryptedItems('category', [payload]));
 
             toast({ title: "Category Added", description: newItem.name });
             setNewName('');
@@ -135,18 +101,8 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                 parentId: editParentId || undefined
             };
 
-            // Encrypt
-            const aad = new TextEncoder().encode('category');
-            const { ciphertextBase64, ivBase64 } = await encryptData(updatedItem, dek, aad);
-            const aadBase64 = btoa(String.fromCharCode(...aad));
-
-            // Save with upsertMode=true
-            await saveEncryptedItems('category', [{
-                uniqueId: updatedItem.id,
-                ciphertextBase64,
-                ivBase64,
-                aadBase64
-            }], true);
+            const payload = await encryptResourceItem('category', updatedItem, dek, updatedItem.id);
+            unwrap(await saveEncryptedItems('category', [payload], true));
 
             toast({ title: "Category Updated", description: updatedItem.name });
             setEditingCategory(null);
@@ -163,7 +119,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         if (!confirm("Delete this category? Transactions will lose this tag.")) return;
 
         try {
-            await deleteCategory(id);
+            unwrap(await deleteCategory(id));
             toast({ title: "Deleted", description: "Category removed." });
             onRefresh();
         } catch (e) {
@@ -182,20 +138,10 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
 
             const payloads = [];
             for (const item of defaultCategories) {
-                // Encrypt
-                const aad = new TextEncoder().encode('category');
-                const { ciphertextBase64, ivBase64 } = await encryptData(item, dek, aad);
-                const aadBase64 = btoa(String.fromCharCode(...aad));
-
-                payloads.push({
-                    uniqueId: item.id,
-                    ciphertextBase64,
-                    ivBase64,
-                    aadBase64
-                });
+                payloads.push(await encryptResourceItem('category', item, dek, item.id));
             }
 
-            await saveEncryptedItems('category', payloads);
+            unwrap(await saveEncryptedItems('category', payloads));
             toast({ title: "Defaults Added", description: `${payloads.length} categories created.` });
             onRefresh();
         } catch (e) {
@@ -215,35 +161,10 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         setIsEditIconSelectOpen(false);
     };
 
-    const categoriesById = useMemo(() => {
-        return new Map(categories.map((cat) => [cat.id, cat]));
-    }, [categories]);
-
-    const { rootCategories, childrenByParentId } = useMemo(() => {
-        const nextChildrenByParentId = new Map<string, CategoryItem[]>();
-        const nextRoots: CategoryItem[] = [];
-
-        for (const cat of categories) {
-            if (cat.parentId && categoriesById.has(cat.parentId)) {
-                const children = nextChildrenByParentId.get(cat.parentId) || [];
-                children.push(cat);
-                nextChildrenByParentId.set(cat.parentId, children);
-            } else {
-                nextRoots.push(cat);
-            }
-        }
-
-        const sortByName = (a: CategoryItem, b: CategoryItem) => a.name.localeCompare(b.name);
-        nextRoots.sort(sortByName);
-        for (const children of nextChildrenByParentId.values()) {
-            children.sort(sortByName);
-        }
-
-        return {
-            rootCategories: nextRoots,
-            childrenByParentId: nextChildrenByParentId,
-        };
-    }, [categories, categoriesById]);
+    const { categoriesById, rootCategories, childrenByParentId } = useMemo(
+        () => buildCategoryTree(categories),
+        [categories],
+    );
 
     useEffect(() => {
         const validIds = new Set(categories.map((c) => c.id));
@@ -259,7 +180,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
     const renderCategoryNode = (cat: CategoryItem, depth: number, path: Set<string>): ReactNode => {
         if (path.has(cat.id)) return null;
 
-        const Icon = ICON_MAP[cat.icon] || Layers;
+        const Icon = CATEGORY_ICON_MAP[cat.icon] || Layers;
         const children = childrenByParentId.get(cat.id) || [];
         const hasChildren = children.length > 0;
         const isExpanded = hasChildren && expandedCategoryIds.has(cat.id);
@@ -366,22 +287,8 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         );
     };
 
-    const SelectedIcon = ICON_MAP[newIcon] || Layers;
-    const EditSelectedIcon = ICON_MAP[editIcon] || Layers;
-
-    const isDescendantOf = (candidateDescendantId: string, ancestorId: string): boolean => {
-        const visited = new Set<string>();
-        let currentId: string | undefined = candidateDescendantId;
-
-        while (currentId) {
-            if (currentId === ancestorId) return true;
-            if (visited.has(currentId)) break;
-            visited.add(currentId);
-            currentId = categoriesById.get(currentId)?.parentId;
-        }
-
-        return false;
-    };
+    const SelectedIcon = CATEGORY_ICON_MAP[newIcon] || Layers;
+    const EditSelectedIcon = CATEGORY_ICON_MAP[editIcon] || Layers;
 
     const updateCategoryParent = async (categoryId: string, nextParentId?: string) => {
         if (!dek) return;
@@ -394,16 +301,8 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         setIsSubmitting(true);
         try {
             const updatedItem: CategoryItem = { ...existing, parentId: nextParentId };
-            const aad = new TextEncoder().encode('category');
-            const { ciphertextBase64, ivBase64 } = await encryptData(updatedItem, dek, aad);
-            const aadBase64 = btoa(String.fromCharCode(...aad));
-
-            await saveEncryptedItems('category', [{
-                uniqueId: updatedItem.id,
-                ciphertextBase64,
-                ivBase64,
-                aadBase64
-            }], true);
+            const payload = await encryptResourceItem('category', updatedItem, dek, updatedItem.id);
+            unwrap(await saveEncryptedItems('category', [payload], true));
 
             onRefresh();
         } catch (e) {
@@ -449,7 +348,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         handleDragEnd();
         if (!draggedId || draggedId === targetCategoryId) return;
 
-        if (isDescendantOf(targetCategoryId, draggedId)) {
+        if (isDescendantCategory(categoriesById, targetCategoryId, draggedId)) {
             toast({
                 title: "Invalid Move",
                 description: "A category cannot be moved under itself or one of its descendants.",
@@ -530,7 +429,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                                     onClick={() => setIsIconSelectOpen(false)}
                                 />
                                 <div className="absolute top-full left-0 mt-1 w-full max-h-60 bg-white dark:bg-black overflow-auto rounded-md border p-1 text-popover-foreground shadow-md z-20">
-                                    {Object.entries(ICON_MAP).map(([name, Icon]) => (
+                                    {Object.entries(CATEGORY_ICON_MAP).map(([name, Icon]) => (
                                         <button
                                             key={name}
                                             type="button"
@@ -649,7 +548,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
 
                             {isEditIconSelectOpen && (
                                 <div className="absolute top-full left-0 mt-1 w-full max-h-48 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md z-[60]">
-                                    {Object.entries(ICON_MAP).map(([name, Icon]) => (
+                                    {Object.entries(CATEGORY_ICON_MAP).map(([name, Icon]) => (
                                         <button
                                             key={name}
                                             type="button"

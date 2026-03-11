@@ -1,20 +1,15 @@
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
-import { getVaultsByUserId } from '@/src/db/queries/vaults';
-import { getVaultItems } from '@/src/db/queries/vaultItems';
+import { getVaultItems } from '@/db/queries/vaultItems';
+import { ok, type ActionResult } from '@/lib/actions/result';
+import { requirePrimaryVault } from '@/server/actions/shared';
+import type { VaultItem } from '@/types/database';
 
-export async function fetchMappingProfiles() {
-  const { userId } = await auth();
-  if (!userId) return { success: false, error: 'Unauthorized' };
+export async function fetchMappingProfiles(): Promise<ActionResult<{ items: VaultItem[] }>> {
+  const vault = await requirePrimaryVault();
+  if (!vault.success) return vault;
 
-  const vaults = await getVaultsByUserId(userId);
-  if (!vaults || vaults.length === 0) {
-    return { success: false, error: 'No vault found' };
-  }
-  const primaryVault = vaults[0];
+  const items = await getVaultItems(vault.data.vaultId, 'mapping_profile');
 
-  const items = await getVaultItems(primaryVault.id, 'mapping_profile');
-
-  return { success: true, items };
+  return ok({ items });
 }

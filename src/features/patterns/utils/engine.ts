@@ -1,6 +1,32 @@
 import { PatternItem } from '../types';
 import { TransactionRow } from '../../upload/types';
 
+export function matchesPattern(transaction: TransactionRow, pattern: PatternItem): boolean {
+    const description = transaction.description.toLowerCase();
+    const merchant = (transaction.merchantOrName || '').toLowerCase();
+    const matchStr = pattern.matchString.toLowerCase();
+
+    if (pattern.matchType === 'contains') {
+        return description.includes(matchStr) || merchant.includes(matchStr);
+    }
+
+    if (pattern.matchType === 'exact') {
+        return description === matchStr || merchant === matchStr;
+    }
+
+    if (pattern.matchType === 'regex') {
+        try {
+            const regex = new RegExp(pattern.matchString, 'i');
+            return regex.test(transaction.description) || (transaction.merchantOrName ? regex.test(transaction.merchantOrName) : false);
+        } catch (e) {
+            console.error("Invalid regex in pattern:", pattern.id, e);
+            return false;
+        }
+    }
+
+    return false;
+}
+
 /**
  * Matches a single transaction against a list of patterns.
  * Returns the matched categoryId or undefined.
@@ -11,29 +37,10 @@ export function matchTransaction(
 ): string | undefined {
     // Sort patterns by priority (highest first)
     const sortedPatterns = [...patterns].sort((a, b) => b.priority - a.priority);
-    const description = transaction.description.toLowerCase();
-    const merchant = (transaction.merchantOrName || '').toLowerCase();
 
     for (const pattern of sortedPatterns) {
-        const matchStr = pattern.matchString.toLowerCase();
-        
-        if (pattern.matchType === 'contains') {
-            if (description.includes(matchStr) || merchant.includes(matchStr)) {
-                return pattern.categoryId;
-            }
-        } else if (pattern.matchType === 'exact') {
-            if (description === matchStr || merchant === matchStr) {
-                return pattern.categoryId;
-            }
-        } else if (pattern.matchType === 'regex') {
-            try {
-                const regex = new RegExp(pattern.matchString, 'i');
-                if (regex.test(transaction.description) || (transaction.merchantOrName && regex.test(transaction.merchantOrName))) {
-                    return pattern.categoryId;
-                }
-            } catch (e) {
-                console.error("Invalid regex in pattern:", pattern.id, e);
-            }
+        if (matchesPattern(transaction, pattern)) {
+            return pattern.categoryId;
         }
     }
 
@@ -48,29 +55,10 @@ export function findMatchingPattern(
     patterns: PatternItem[]
 ): PatternItem | undefined {
     const sortedPatterns = [...patterns].sort((a, b) => b.priority - a.priority);
-    const description = transaction.description.toLowerCase();
-    const merchant = (transaction.merchantOrName || '').toLowerCase();
 
     for (const pattern of sortedPatterns) {
-        const matchStr = pattern.matchString.toLowerCase();
-        
-        if (pattern.matchType === 'contains') {
-            if (description.includes(matchStr) || merchant.includes(matchStr)) {
-                return pattern;
-            }
-        } else if (pattern.matchType === 'exact') {
-            if (description === matchStr || merchant === matchStr) {
-                return pattern;
-            }
-        } else if (pattern.matchType === 'regex') {
-            try {
-                const regex = new RegExp(pattern.matchString, 'i');
-                if (regex.test(transaction.description) || (transaction.merchantOrName && regex.test(transaction.merchantOrName))) {
-                    return pattern;
-                }
-            } catch (e) {
-                console.error("Invalid regex in pattern:", pattern.id, e);
-            }
+        if (matchesPattern(transaction, pattern)) {
+            return pattern;
         }
     }
     return undefined;

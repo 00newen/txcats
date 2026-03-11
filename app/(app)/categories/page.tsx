@@ -1,15 +1,14 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
-import { CategoryManager } from '@/src/features/categories/components/CategoryManager';
-import { CategoryItem } from '@/src/features/categories/types';
+import { useVault } from '@/auth/VaultProvider';
+import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
+import { CategoryManager } from '@/features/categories/components/CategoryManager';
+import { CategoryItem } from '@/features/categories/types';
 import { Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { decryptData } from '@/src/crypto/encryption';
-import { fetchCategories } from '@/src/server/actions/categories';
 import { useUser } from '@clerk/nextjs';
 import { cn } from '@/lib/utils';
+import { loadCategories as loadDecryptedCategories } from '@/lib/vault/loaders';
 
 export default function CategoriesPage() {
   const { dek } = useVault();
@@ -21,22 +20,8 @@ export default function CategoriesPage() {
     if (!dek) return;
     setIsLoading(true);
     try {
-      const { success, items } = await fetchCategories();
-      if (success && items) {
-        const decrypted: CategoryItem[] = [];
-        for (const item of items) {
-          try {
-            const aad = new TextEncoder().encode('category');
-            const plain = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad);
-            decrypted.push(plain as CategoryItem);
-          } catch (e) {
-            console.error('Failed to decrypt category', item.uniqueId, e);
-          }
-        }
-        // Category type is inferred from transaction data, so keep a stable alphabetical sort.
-        decrypted.sort((a, b) => a.name.localeCompare(b.name));
-        setCategories(decrypted);
-      }
+      const result = await loadDecryptedCategories(dek);
+      setCategories(result.items as CategoryItem[]);
     } catch (e) {
       console.error(e);
     } finally {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
+import { useVault } from '@/auth/VaultProvider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,14 +20,11 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ProtectedVaultContent } from '@/src/components/auth/ProtectedVaultContent';
+import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { fetchTransactions } from '@/src/server/actions/transactions';
-import { fetchCategories } from '@/src/server/actions/categories';
-import { decryptData } from '@/src/crypto/encryption';
-import { TransactionRow } from '@/src/features/upload/types';
-import { CategoryItem } from '@/src/features/categories/types';
-import { startOfMonth, endOfMonth, format, parseISO, eachDayOfInterval, startOfYear, endOfYear, subDays } from 'date-fns';
+import { TransactionRow } from '@/features/upload/types';
+import { CategoryItem } from '@/features/categories/types';
+import { startOfMonth, endOfMonth, format, parseISO, startOfYear, endOfYear, subDays } from 'date-fns';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -35,9 +32,17 @@ import { ThemeToggle } from '@/components/core/ThemeToggle';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { loadCategories, loadTransactions } from '@/lib/vault/loaders';
+import {
+  buildChartData,
+  buildExpensesByCategory,
+  calculateTransactionStats,
+  filterTransactionsByDateRange,
+  type ExpenseCategorySlice,
+} from '@/features/dashboard/utils/stats';
+import { isDateOnly, normalizeDateRange } from '@/features/transactions/utils/filters';
 
 type DashboardTx = TransactionRow & { uniqueId?: string };
-type ExpenseCategorySlice = { key: string; name: string; value: number };
 
 export default function DashboardPage() {
   const { isUnlocked, dek } = useVault();
@@ -66,14 +71,10 @@ export default function DashboardPage() {
     const urlEnd = searchParams.get('endDate') || '';
 
     if (isDateOnly(urlStart) && isDateOnly(urlEnd)) {
-      if (urlStart !== startDate || urlEnd !== endDate) {
-        if (urlStart <= urlEnd) {
-          setStartDate(urlStart);
-          setEndDate(urlEnd);
-        } else {
-          setStartDate(urlEnd);
-          setEndDate(urlStart);
-        }
+      const normalizedRange = normalizeDateRange(urlStart, urlEnd);
+      if (normalizedRange.startDate !== startDate || normalizedRange.endDate !== endDate) {
+        setStartDate(normalizedRange.startDate);
+        setEndDate(normalizedRange.endDate);
       }
       return;
     }
@@ -81,13 +82,9 @@ export default function DashboardPage() {
     const savedStart = localStorage.getItem('dashboard-start-date');
     const savedEnd = localStorage.getItem('dashboard-end-date');
     if (savedStart && savedEnd && isDateOnly(savedStart) && isDateOnly(savedEnd)) {
-      if (savedStart <= savedEnd) {
-        setStartDate(savedStart);
-        setEndDate(savedEnd);
-      } else {
-        setStartDate(savedEnd);
-        setEndDate(savedStart);
-      }
+      const normalizedRange = normalizeDateRange(savedStart, savedEnd);
+      setStartDate(normalizedRange.startDate);
+      setEndDate(normalizedRange.endDate);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -112,58 +109,23 @@ export default function DashboardPage() {
     setLoadError(null);
     setLoadWarning(null);
     try {
-      // Load Categories
-      const catRes = await fetchCategories();
-      let categoryDecryptFailures = 0;
-      const decCats: CategoryItem[] = [];
-      if (catRes.success && catRes.items) {
-        const categoriesResults = await Promise.all(
-          catRes.items.map(async (item) => {
-            try {
-              const aad = new TextEncoder().encode('category');
-              return (await decryptData(item.ciphertextBase64, item.ivBase64, dek, aad)) as CategoryItem;
-            } catch {
-              categoryDecryptFailures++;
-              return null;
-            }
-          }),
-        );
-        decCats.push(...categoriesResults.filter((item): item is CategoryItem => item !== null));
-      }
-      setCategories(decCats);
+      const [categoryResult, transactionResult] = await Promise.all([
+        loadCategories(dek),
+        loadTransactions(dek),
+      ]);
 
-      // Load Transactions
-      const txRes = await fetchTransactions();
-      let txDecryptFailures = 0;
-      if (txRes.success && txRes.items) {
-        const txResults = await Promise.all(
-          txRes.items.map(async (item) => {
-            try {
-              const aadBytes = new Uint8Array(
-                atob(item.aadBase64)
-                  .split('')
-                  .map((c) => c.charCodeAt(0)),
-              );
-              const plain = (await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes)) as TransactionRow;
-              return {
-                ...plain,
-                uniqueId: item.uniqueId || undefined,
-              } as DashboardTx;
-            } catch {
-              txDecryptFailures++;
-              return null;
-            }
-          }),
-        );
-        const decTxs = txResults.filter((item): item is DashboardTx => item !== null);
-        setTransactions(decTxs);
-      } else {
-        setTransactions([]);
-      }
+      setCategories(categoryResult.items as CategoryItem[]);
+      setTransactions(
+        transactionResult.items.map((item) => ({
+          ...item,
+          uniqueId: item.uniqueId || undefined,
+        })) as DashboardTx[],
+      );
 
-      if (categoryDecryptFailures > 0 || txDecryptFailures > 0) {
+      const failureCount = categoryResult.failureCount + transactionResult.failureCount;
+      if (failureCount > 0) {
         setLoadWarning(
-          `${categoryDecryptFailures + txDecryptFailures} item(s) could not be decrypted and were skipped.`,
+          `${failureCount} item(s) could not be decrypted and were skipped.`,
         );
       }
     } catch (e) {
@@ -186,117 +148,17 @@ export default function DashboardPage() {
 
   const stats = useMemo(() => {
     if (!transactions) return null;
-
-    const filtered = transactions.filter((tx) => {
-      const date = tx.bookingDate;
-      return date >= startDate && date <= endDate;
-    });
-
-    const totalIncome = transactions.reduce((acc, tx) => {
-      const val = parseAmount(tx.amount);
-      if (isNaN(val)) return acc;
-      return val > 0 ? acc + val : acc;
-    }, 0);
-
-    const totalExpenses = transactions.reduce((acc, tx) => {
-      const val = parseAmount(tx.amount);
-      if (isNaN(val)) return acc;
-      return val < 0 ? acc + Math.abs(val) : acc;
-    }, 0);
-
-    const income = filtered.reduce((acc, tx) => {
-      const val = parseAmount(tx.amount);
-      if (isNaN(val)) return acc;
-      return val > 0 ? acc + val : acc;
-    }, 0);
-
-    const expenses = filtered.reduce((acc, tx) => {
-      const val = parseAmount(tx.amount);
-      if (isNaN(val)) return acc;
-      return val < 0 ? acc + Math.abs(val) : acc;
-    }, 0);
-
-    const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0;
-
-    return {
-      totalTransactions: transactions.length,
-      totalCategories: categories.length,
-      totalIncome,
-      totalExpenses,
-      filteredCount: filtered.length,
-      income,
-      expenses,
-      net: income - expenses,
-      savingsRate,
-    };
+    return calculateTransactionStats(transactions, categories, startDate, endDate);
   }, [transactions, categories, startDate, endDate]);
 
   const chartData = useMemo(() => {
     if (!transactions) return [];
-
-    const filtered = transactions.filter((tx) => {
-      const date = tx.bookingDate;
-      return date >= startDate && date <= endDate;
-    });
-
-    // Optimize by pre-grouping transactions by date
-    const grouped = filtered.reduce(
-      (acc, tx) => {
-        const d = tx.bookingDate;
-        if (!acc[d]) acc[d] = { income: 0, expenses: 0 };
-        const val = parseAmount(tx.amount);
-        if (isNaN(val)) return acc;
-        if (val > 0) acc[d].income += val;
-        else acc[d].expenses += Math.abs(val);
-        return acc;
-      },
-      {} as Record<string, { income: number; expenses: number }>,
-    );
-
-    const days = eachDayOfInterval({
-      start: parseISO(startDate),
-      end: parseISO(endDate),
-    });
-
-    return days.map((day) => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      const data = grouped[dateStr] || { income: 0, expenses: 0 };
-
-      return {
-        date: format(day, 'MMM dd'),
-        income: parseFloat(data.income.toFixed(2)),
-        expenses: parseFloat(data.expenses.toFixed(2)),
-      };
-    });
+    return buildChartData(transactions, startDate, endDate);
   }, [transactions, startDate, endDate]);
 
   const expensesByCategory = useMemo(() => {
     if (!transactions) return [];
-
-    const grouped = transactions.reduce(
-      (acc, tx) => {
-        const date = tx.bookingDate;
-        if (date < startDate || date > endDate) return acc;
-
-        const amount = parseAmount(tx.amount);
-        if (isNaN(amount) || amount >= 0) return acc;
-
-        const key = tx.categoryId || '__uncategorized__';
-        const name = tx.categoryId
-          ? categories.find((c) => c.id === tx.categoryId)?.name || 'Unknown'
-          : 'Uncategorized';
-        if (!acc[key]) {
-          acc[key] = { key, name, value: 0 };
-        }
-        acc[key].value += Math.abs(amount);
-        return acc;
-      },
-      {} as Record<string, ExpenseCategorySlice>,
-    );
-
-    return Object.values(grouped)
-      .map((item) => ({ ...item, value: parseFloat(item.value.toFixed(2)) }))
-      .sort((a, b) => b.value - a.value);
+    return buildExpensesByCategory(transactions, categories, startDate, endDate);
   }, [transactions, startDate, endDate, categories]);
 
   useEffect(() => {
@@ -1189,8 +1051,4 @@ export default function DashboardPage() {
 
     </div>
   );
-}
-
-function isDateOnly(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }

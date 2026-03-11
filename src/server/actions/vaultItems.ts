@@ -1,9 +1,9 @@
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
-import { getVaultsByUserId } from '@/src/db/queries/vaults';
-import { createVaultItemsBulk } from '@/src/db/queries/vaultItems';
+import { createVaultItemsBulk } from '@/db/queries/vaultItems';
 import { revalidatePath } from 'next/cache';
+import { fail, ok, type ActionResult } from '@/lib/actions/result';
+import { requirePrimaryVault } from '@/server/actions/shared';
 
 export type EncryptedPayload = {
   uniqueId: string; // Deterministic ID for deduplication
@@ -16,18 +16,12 @@ export async function saveEncryptedItems(
   resourceType: string,
   payloads: EncryptedPayload[],
   upsertMode: boolean = false
-) {
-  const { userId } = await auth();
-  if (!userId) throw new Error('Unauthorized');
-
-  const vaults = await getVaultsByUserId(userId);
-  if (!vaults || vaults.length === 0) {
-    throw new Error('No vault found. Please complete setup.');
-  }
-  const primaryVault = vaults[0];
+) : Promise<ActionResult<{ count: number }>> {
+  const vault = await requirePrimaryVault();
+  if (!vault.success) return fail(vault.code, vault.error);
 
   const itemsToInsert = payloads.map(p => ({
-    vaultId: primaryVault.id,
+    vaultId: vault.data.vaultId,
     uniqueId: p.uniqueId,
     resourceType: resourceType,
     ciphertextBase64: p.ciphertextBase64,
@@ -48,7 +42,7 @@ export async function saveEncryptedItems(
   revalidatePath('/transactions');
   revalidatePath('/categories');
   
-  return { success: true, count: insertedCount };
+  return ok({ count: insertedCount });
 }
 
 /**

@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test:unit": "sh -c 'pnpm exec tsx --test $(find src lib -name \"*.test.ts\")'",
-    "lint": "next lint",
+    "lint": "node scripts/lint.mjs $(find app components hooks lib src -name \"*.ts\" -o -name \"*.tsx\")",
     "check": "pnpm typecheck && pnpm test:unit && pnpm lint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

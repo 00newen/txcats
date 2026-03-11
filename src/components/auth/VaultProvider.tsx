@@ -2,9 +2,9 @@
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { checkUserSetup } from '@/src/server/actions/auth';
+import { checkUserSetup } from '@/server/actions/auth';
 import { Loader2 } from 'lucide-react';
-import { UserMeta } from '@/src/types/database';
+import { UserMeta } from '@/types/database';
 
 // Context to hold the Data Encryption Key (DEK)
 // CAUTION: This key is sensitive and exists in memory only.
@@ -39,39 +39,34 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const [vaultId, setVaultId] = useState<string | null>(null);
     const [dek, setDek] = useState<CryptoKey | null>(null);
 
-    // Check setup status when user loads
-    useEffect(() => {
-        async function checkSetup() {
-            if (!isUserLoaded || !user) {
-                setIsSetupChecked(true); // Nothing to check if no user
+    const refreshSetupState = useCallback(async () => {
+        try {
+            const result = await checkUserSetup();
+            if (result.meta) {
+                setUserMeta(result.meta as UserMeta);
+                setVaultId(result.vaultId || null);
                 return;
             }
 
-            try {
-                const result = await checkUserSetup();
-                // Server action returns plain object, need to cast or ensure it matches
-                // But checkUserSetup currently returns { isSetup, userId } or similar
-                // We need to update checkUserSetup to return the full meta if established
+            setUserMeta(null);
+            setVaultId(null);
+        } catch (e) {
+            console.error("Failed to check setup", e);
+        } finally {
+            setIsSetupChecked(true);
+        }
+    }, []);
 
-                // Wait, checkUserSetup needs to be improved to return the meta if it exists
-                // Let's modify the server action first to return the META if found.
-                if (result.meta) {
-                    setUserMeta(result.meta as unknown as UserMeta);
-                    setVaultId(result.vaultId || null);
-                } else {
-                    // Explicitly set null if not found to handle logout/switch cases
-                    setUserMeta(null);
-                    setVaultId(null);
-                }
-            } catch (e) {
-                console.error("Failed to check setup", e);
-            } finally {
-                setIsSetupChecked(true);
-            }
+    useEffect(() => {
+        if (!isUserLoaded || !user) {
+            setUserMeta(null);
+            setVaultId(null);
+            setIsSetupChecked(true);
+            return;
         }
 
-        checkSetup();
-    }, [isUserLoaded, user]);
+        refreshSetupState();
+    }, [isUserLoaded, refreshSetupState, user]);
 
     const lock = useCallback(() => {
         setDek(null);
@@ -81,20 +76,6 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setDek(key);
     }, []);
 
-    const handleSetupComplete = useCallback(async () => {
-        // Re-check setup to load the new meta
-        try {
-            const result = await checkUserSetup();
-            if (result.meta) {
-                setUserMeta(result.meta as unknown as UserMeta);
-                setVaultId(result.vaultId || null);
-            }
-        } catch (e) {
-            console.error("Failed to refresh setup state", e);
-        }
-    }, []);
-
-    // 1. Loading State
     if (!isUserLoaded || !isSetupChecked) {
         return (
             <div className="flex h-screen items-center justify-center">
@@ -103,9 +84,6 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         );
     }
 
-    // 5. Always Render Children with Context
-    // logic: if user is not logged in, or setup not done, or locked, we just reflect that in the context
-    // The UI components will decide what to show based on this state.
     return (
         <VaultContext.Provider value={{
             dek,

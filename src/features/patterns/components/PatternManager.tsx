@@ -8,14 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Trash2, Search, Sparkles } from 'lucide-react';
-import { useVault } from '@/src/components/auth/VaultProvider';
+import { useVault } from '@/auth/VaultProvider';
 import { useToast } from '@/hooks/use-toast';
-import { encryptData } from '@/src/crypto/encryption';
-import { saveEncryptedItems } from '@/src/server/actions/vaultItems';
-import { deletePattern } from '@/src/server/actions/patterns';
-import { fetchTransactions } from '@/src/server/actions/transactions';
-import { decryptData } from '@/src/crypto/encryption';
-import { TransactionRow } from '../../upload/types';
+import { saveEncryptedItems } from '@/server/actions/vaultItems';
+import { deletePattern } from '@/server/actions/patterns';
+import { loadTransactions } from '@/lib/vault/loaders';
+import { encryptResourceItem } from '@/lib/vault/resources';
+import { unwrap } from '@/lib/actions/result';
+import { matchesPattern } from '../utils/engine';
 
 interface PatternManagerProps {
     patterns: PatternItem[];
@@ -47,35 +47,8 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
 
     const countAffectedTransactions = async (newRule: PatternItem): Promise<number> => {
         if (!dek) return 0;
-        const txRes = await fetchTransactions();
-        if (!txRes.success || !txRes.items) return 0;
-
-        let count = 0;
-        for (const item of txRes.items) {
-            try {
-                const aadBytes = new Uint8Array(atob(item.aadBase64).split('').map(c => c.charCodeAt(0)));
-                const tx = await decryptData(item.ciphertextBase64, item.ivBase64, dek, aadBytes) as TransactionRow;
-                const description = tx.description.toLowerCase();
-                const merchant = (tx.merchantOrName || '').toLowerCase();
-                const match = newRule.matchString.toLowerCase();
-
-                let matched = false;
-                if (newRule.matchType === 'contains') matched = description.includes(match) || merchant.includes(match);
-                else if (newRule.matchType === 'exact') matched = description === match || merchant === match;
-                else if (newRule.matchType === 'regex') {
-                    try {
-                        const regex = new RegExp(newRule.matchString, 'i');
-                        matched = regex.test(tx.description) || (!!tx.merchantOrName && regex.test(tx.merchantOrName));
-                    } catch {
-                        matched = false;
-                    }
-                }
-
-                if (matched) count++;
-            } catch { }
-        }
-
-        return count;
+        const txResult = await loadTransactions(dek);
+        return txResult.items.filter((transaction) => matchesPattern(transaction, newRule)).length;
     };
 
     const handleAdd = async () => {
@@ -91,16 +64,8 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
                 priority: 0
             };
 
-            const aad = new TextEncoder().encode('pattern');
-            const { ciphertextBase64, ivBase64 } = await encryptData(newItem, dek, aad);
-            const aadBase64 = btoa(String.fromCharCode(...aad));
-
-            await saveEncryptedItems('pattern', [{
-                uniqueId: newItem.id,
-                ciphertextBase64,
-                ivBase64,
-                aadBase64
-            }]);
+            const payload = await encryptResourceItem('pattern', newItem, dek, newItem.id);
+            unwrap(await saveEncryptedItems('pattern', [payload]));
 
             const affectedCount = await countAffectedTransactions(newItem);
             toast({
@@ -121,7 +86,7 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
         if (!confirm("Delete this pattern? Future imports will not be auto-categorized by this rule.")) return;
 
         try {
-            await deletePattern(id);
+            unwrap(await deletePattern(id));
             toast({ title: "Deleted", description: "Pattern removed." });
             onRefresh();
         } catch (e) {

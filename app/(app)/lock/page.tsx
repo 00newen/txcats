@@ -1,8 +1,8 @@
 'use client';
 
-import { useVault } from '@/src/components/auth/VaultProvider';
-import { PassphraseSetup } from '@/src/components/auth/PassphraseSetup';
-import { UnlockScreen } from '@/src/components/auth/UnlockScreen';
+import { useVault } from '@/auth/VaultProvider';
+import { PassphraseSetup } from '@/auth/PassphraseSetup';
+import { UnlockScreen } from '@/auth/UnlockScreen';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
