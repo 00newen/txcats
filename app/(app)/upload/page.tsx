@@ -7,6 +7,7 @@ import { TransactionPreview } from '@/features/upload/components/TransactionPrev
 import { ColumnMapping } from '@/features/upload/components/ColumnMapping';
 import { ParseResult, TransactionRow, CsvMapping } from '@/features/upload/types';
 import { mapRows } from '@/features/upload/utils/parser';
+import { getAccountByIdentifier } from '@/features/accounts/utils/display';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,7 +23,8 @@ import { MappingProfile } from '@/features/upload/types';
 import { getHeadersFingerprint } from '@/features/upload/utils/parser';
 import { saveEncryptedItems } from '@/server/actions/vaultItems';
 import { useEffect, useCallback } from 'react';
-import { loadCategories, loadMappingProfiles, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { loadAccounts, loadCategories, loadMappingProfiles, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { encryptResourceItem, type AccountItem } from '@/lib/vault/resources';
 import { unwrap } from '@/lib/actions/result';
 
 export default function UploadPage() {
@@ -47,17 +49,39 @@ export default function UploadPage() {
   const [patterns, setPatterns] = useState<PatternItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [mappingProfiles, setMappingProfiles] = useState<MappingProfile[]>([]);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const [accountLabelDrafts, setAccountLabelDrafts] = useState<Record<string, string>>({});
+
+  const getUniqueAccountIds = (rows: TransactionRow[]) =>
+    Array.from(new Set(rows.map((row) => row.accountId?.trim()).filter((accountId): accountId is string => !!accountId)));
+
+  const buildAccountLabelDrafts = (
+    rows: TransactionRow[],
+    knownAccounts: AccountItem[],
+    previousDrafts: Record<string, string> = {},
+  ) =>
+    getUniqueAccountIds(rows).reduce<Record<string, string>>((drafts, accountId) => {
+      if (previousDrafts[accountId] !== undefined) {
+        drafts[accountId] = previousDrafts[accountId];
+        return drafts;
+      }
+
+      drafts[accountId] = getAccountByIdentifier(knownAccounts, accountId)?.name || '';
+      return drafts;
+    }, {});
 
   const loadMetaData = useCallback(async () => {
     if (!dek) return;
     try {
-      const [categoryResult, patternResult, mappingResult, transactionResult] = await Promise.all([
+      const [accountResult, categoryResult, patternResult, mappingResult, transactionResult] = await Promise.all([
+        loadAccounts(dek),
         loadCategories(dek),
         loadPatterns(dek),
         loadMappingProfiles(dek),
         loadTransactions(dek),
       ]);
 
+      setAccounts(accountResult.items as AccountItem[]);
       setCategories(categoryResult.items as CategoryItem[]);
       setPatterns(patternResult.items as PatternItem[]);
       setMappingProfiles(mappingResult.items as MappingProfile[]);
@@ -184,6 +208,7 @@ export default function UploadPage() {
     const enriched = await enrichWithMetadata(categorized);
 
     setParsedData(enriched);
+    setAccountLabelDrafts((prev) => buildAccountLabelDrafts(enriched, accounts, prev));
     setStep('preview');
   };
 
@@ -196,6 +221,7 @@ export default function UploadPage() {
   const handleReset = () => {
     setParseResult(null);
     setParsedData(null);
+    setAccountLabelDrafts({});
     setStep('upload');
   };
 
@@ -204,6 +230,58 @@ export default function UploadPage() {
 
     setIsImporting(true);
     try {
+      const uniqueAccountIds = getUniqueAccountIds(parsedData);
+      const accountPayloads = [];
+
+      for (const accountId of uniqueAccountIds) {
+        const label = accountLabelDrafts[accountId]?.trim();
+        if (!label) continue;
+
+        const existingAccount = getAccountByIdentifier(accounts, accountId);
+        const firstMatch = parsedData.find((row) => row.accountId === accountId);
+        accountPayloads.push(
+          await encryptResourceItem(
+            'account',
+            {
+              name: label,
+              identifier: accountId,
+              type: existingAccount?.type || 'other',
+              currency: existingAccount?.currency || firstMatch?.currency || 'EUR',
+            },
+            dek,
+            accountId,
+          ),
+        );
+      }
+
+      if (accountPayloads.length > 0) {
+        unwrap(await saveEncryptedItems('account', accountPayloads, true));
+        setAccounts((prev) => {
+          const next = [...prev];
+
+          for (const accountId of uniqueAccountIds) {
+            const label = accountLabelDrafts[accountId]?.trim();
+            if (!label) continue;
+
+            const existingIndex = next.findIndex((account) => account.identifier === accountId);
+            const row = parsedData.find((item) => item.accountId === accountId);
+            const nextItem: AccountItem = {
+              id: existingIndex >= 0 ? next[existingIndex].id : accountId,
+              uniqueId: accountId,
+              identifier: accountId,
+              name: label,
+              type: existingIndex >= 0 ? next[existingIndex].type : 'other',
+              currency: existingIndex >= 0 ? next[existingIndex].currency : row?.currency || 'EUR',
+            };
+
+            if (existingIndex >= 0) next[existingIndex] = nextItem;
+            else next.push(nextItem);
+          }
+
+          return next;
+        });
+      }
+
       toast({ title: 'Encrypting...', description: `Processing ${parsedData.length} transactions locally.` });
 
       // 1. Encrypt Data Client-Side
@@ -283,6 +361,14 @@ export default function UploadPage() {
           <TransactionPreview
             data={parsedData}
             categories={categories}
+            existingAccounts={accounts}
+            accountLabelDrafts={accountLabelDrafts}
+            onAccountLabelChange={(accountId, label) =>
+              setAccountLabelDrafts((prev) => ({
+                ...prev,
+                [accountId]: label,
+              }))
+            }
             onBack={() => setStep('mapping')}
             onReset={handleReset}
             onConfirm={handleImport}

@@ -6,12 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { getAccountByIdentifier, getAccountDisplay } from '@/features/accounts/utils/display';
 import { Loader2, Sparkles, Check, Calendar, Tag, Info, X, Layers } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TransactionRow } from '@/features/upload/types';
 import { CategoryItem } from '@/features/categories/types';
 import { updateEncryptedItem } from '@/server/actions/transactions';
-import { findMatchingPattern, matchTransaction } from '@/features/patterns/utils/engine';
+import { findMatchingPattern, matchTransaction, matchesPattern } from '@/features/patterns/utils/engine';
 import { PatternItem } from '@/features/patterns/types';
 import { describePatternCondition, getPrimaryCondition } from '@/features/patterns/utils/model';
 import { saveEncryptedItems } from '@/server/actions/vaultItems';
@@ -25,8 +26,8 @@ import { useRef } from 'react';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
 import { useUser } from '@clerk/nextjs';
-import { loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
-import { dedupeEncryptedPayloads, encryptResourceItem } from '@/lib/vault/resources';
+import { loadAccounts, loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { dedupeEncryptedPayloads, encryptResourceItem, type AccountItem } from '@/lib/vault/resources';
 import { filterTransactions, isDateOnly, normalizeCategoryFilter, normalizeDateRange } from '@/features/transactions/utils/filters';
 import { unwrap } from '@/lib/actions/result';
 
@@ -40,6 +41,7 @@ export default function TransactionsPage() {
   const { isSignedIn } = useUser();
 
   const [data, setData] = useState<(TransactionRow & { id: string; uniqueId: string })[] | null>(null);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [patterns, setPatterns] = useState<PatternItem[]>([]);
 
@@ -48,12 +50,15 @@ export default function TransactionsPage() {
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [patternFilter, setPatternFilter] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
   // Detail Modal
   const [selectedTx, setSelectedTx] = useState<(TransactionRow & { id: string; uniqueId: string }) | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [accountLabelDraft, setAccountLabelDraft] = useState('');
+  const [isSavingAccountLabel, setIsSavingAccountLabel] = useState(false);
   const openedFromQueryRef = useRef<string>('');
   const isHydratingFiltersFromUrlRef = useRef(true);
 
@@ -66,6 +71,12 @@ export default function TransactionsPage() {
     if (!dek) return;
     const result = await loadCategories(dek);
     setCategories(result.items as CategoryItem[]);
+  }, [dek]);
+
+  const loadAccountData = useCallback(async () => {
+    if (!dek) return;
+    const result = await loadAccounts(dek);
+    setAccounts(result.items as AccountItem[]);
   }, [dek]);
 
   const loadPatternData = useCallback(async () => {
@@ -91,26 +102,30 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     if (dek) {
-      Promise.all([loadCategoryData(), loadPatternData(), loadTransactionData()]);
+      Promise.all([loadAccountData(), loadCategoryData(), loadPatternData(), loadTransactionData()]);
     } else {
       setIsLoading(false);
+      setAccounts([]);
       setData([]);
     }
-  }, [dek, loadCategoryData, loadPatternData, loadTransactionData]);
+  }, [dek, loadAccountData, loadCategoryData, loadPatternData, loadTransactionData]);
 
   useEffect(() => {
     isHydratingFiltersFromUrlRef.current = true;
 
     const nextCategory = searchParams.get('category') || '';
+    const nextPattern = searchParams.get('pattern') || '';
     const nextStart = searchParams.get('startDate') || '';
     const nextEnd = searchParams.get('endDate') || '';
 
     const safeCategory = normalizeCategoryFilter(nextCategory);
+    const safePattern = nextPattern.trim();
     const safeStart = isDateOnly(nextStart) ? nextStart : '';
     const safeEnd = isDateOnly(nextEnd) ? nextEnd : '';
 
     const normalizedRange = normalizeDateRange(safeStart, safeEnd);
     setCategoryFilter(safeCategory);
+    setPatternFilter(safePattern);
     setStartDate(normalizedRange.startDate);
     setEndDate(normalizedRange.endDate);
     setPage(1);
@@ -118,23 +133,28 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     const currentCategory = normalizeCategoryFilter(searchParams.get('category') || '');
+    const currentPattern = (searchParams.get('pattern') || '').trim();
     const currentStart = isDateOnly(searchParams.get('startDate') || '') ? searchParams.get('startDate') || '' : '';
     const currentEnd = isDateOnly(searchParams.get('endDate') || '') ? searchParams.get('endDate') || '' : '';
     const nextCategory = normalizeCategoryFilter(categoryFilter);
+    const nextPattern = patternFilter.trim();
     const nextStart = isDateOnly(startDate) ? startDate : '';
     const nextEnd = isDateOnly(endDate) ? endDate : '';
 
     if (isHydratingFiltersFromUrlRef.current) {
-      if (nextCategory !== currentCategory || nextStart !== currentStart || nextEnd !== currentEnd) return;
+      if (nextCategory !== currentCategory || nextPattern !== currentPattern || nextStart !== currentStart || nextEnd !== currentEnd) return;
       isHydratingFiltersFromUrlRef.current = false;
       return;
     }
 
-    if (nextCategory === currentCategory && nextStart === currentStart && nextEnd === currentEnd) return;
+    if (nextCategory === currentCategory && nextPattern === currentPattern && nextStart === currentStart && nextEnd === currentEnd) return;
 
     const params = new URLSearchParams(searchParams.toString());
     if (nextCategory !== 'all') params.set('category', nextCategory);
     else params.delete('category');
+
+    if (nextPattern) params.set('pattern', nextPattern);
+    else params.delete('pattern');
 
     if (nextStart) params.set('startDate', nextStart);
     else params.delete('startDate');
@@ -144,7 +164,7 @@ export default function TransactionsPage() {
 
     const nextQuery = params.toString();
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [categoryFilter, startDate, endDate, pathname, router, searchParams]);
+  }, [categoryFilter, patternFilter, startDate, endDate, pathname, router, searchParams]);
 
   useEffect(() => {
     if (!data || data.length === 0) return;
@@ -247,14 +267,37 @@ export default function TransactionsPage() {
   // Client-side filtering
   const filteredData = useMemo(() => {
     if (!data) return [];
-    return filterTransactions(data, { categoryFilter, startDate, endDate });
-  }, [data, categoryFilter, startDate, endDate]);
+    const baseFiltered = filterTransactions(data, { categoryFilter, startDate, endDate });
+    if (!patternFilter) return baseFiltered;
+
+    const pattern = patterns.find((item) => item.id === patternFilter);
+    if (!pattern) return [];
+
+    return baseFiltered.filter((transaction) => matchesPattern(transaction, pattern));
+  }, [data, categoryFilter, startDate, endDate, patternFilter, patterns]);
+
+  const activePattern = useMemo(
+    () => patterns.find((pattern) => pattern.id === patternFilter),
+    [patterns, patternFilter],
+  );
+
+  const activePatternLabel = useMemo(() => {
+    if (!activePattern) return null;
+    const primaryCondition = getPrimaryCondition(activePattern);
+    const { fieldLabel, operatorLabel, valueLabel } = describePatternCondition(primaryCondition);
+    return `${fieldLabel} ${operatorLabel} ${valueLabel}`;
+  }, [activePattern]);
 
   const paginatedData = filteredData.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const selectedAccountDisplay = useMemo(
+    () => getAccountDisplay(accounts, selectedTx?.accountId),
+    [accounts, selectedTx?.accountId],
+  );
 
   const resetFilters = () => {
     setCategoryFilter('all');
+    setPatternFilter('');
     setStartDate('');
     setEndDate('');
     setPage(1);
@@ -263,6 +306,70 @@ export default function TransactionsPage() {
   const openTxDetail = (tx: TransactionRow & { id: string; uniqueId: string }) => {
     setSelectedTx(tx);
     setIsModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!selectedTx?.accountId) {
+      setAccountLabelDraft('');
+      return;
+    }
+
+    setAccountLabelDraft(getAccountByIdentifier(accounts, selectedTx.accountId)?.name || '');
+  }, [accounts, selectedTx?.accountId]);
+
+  const handleAccountLabelSave = async () => {
+    if (!selectedTx?.accountId || !dek) return;
+
+    const accountId = selectedTx.accountId;
+    const fallbackCurrency = selectedTx.currency || 'EUR';
+    const label = accountLabelDraft.trim();
+    if (!label) {
+      toast({ title: 'Label required', description: 'Add a short label before saving.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingAccountLabel(true);
+    try {
+      const existingAccount = getAccountByIdentifier(accounts, selectedTx.accountId);
+      const payload = await encryptResourceItem(
+        'account',
+        {
+          name: label,
+          identifier: accountId,
+          type: existingAccount?.type || 'other',
+          currency: existingAccount?.currency || fallbackCurrency,
+        },
+        dek,
+        accountId,
+      );
+
+      unwrap(await saveEncryptedItems('account', [payload], true));
+      setAccounts((prev) => {
+        const index = prev.findIndex((account) => account.identifier === accountId);
+        const nextItem: AccountItem = {
+          id: index >= 0 ? prev[index].id : accountId,
+          uniqueId: accountId,
+          identifier: accountId,
+          name: label,
+          type: index >= 0 ? prev[index].type : 'other',
+          currency: index >= 0 ? prev[index].currency : fallbackCurrency,
+        };
+
+        if (index >= 0) {
+          const next = [...prev];
+          next[index] = nextItem;
+          return next;
+        }
+
+        return [...prev, nextItem];
+      });
+      toast({ title: 'Account label saved', description: 'This label will now show anywhere this account appears.' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Could not save label', variant: 'destructive' });
+    } finally {
+      setIsSavingAccountLabel(false);
+    }
   };
 
   if (isLoading && !data && isSignedIn) {
@@ -374,7 +481,7 @@ export default function TransactionsPage() {
               </Button>
             </div>
 
-            {(categoryFilter !== 'all' || startDate || endDate) && (
+            {(categoryFilter !== 'all' || patternFilter || startDate || endDate) && (
               <div className='flex items-center gap-2'>
                 <span className='text-[10px] font-bold text-muted-foreground uppercase'>Active Filters:</span>
                 {categoryFilter !== 'all' && (
@@ -383,6 +490,11 @@ export default function TransactionsPage() {
                     {categoryFilter === 'uncategorized'
                       ? 'Uncategorized'
                       : categories.find((c) => c.id === categoryFilter)?.name}
+                  </Badge>
+                )}
+                {patternFilter && (
+                  <Badge variant='secondary' className='text-[9px] h-5 max-w-[320px] truncate'>
+                    Pattern: {activePatternLabel || 'Unknown'}
                   </Badge>
                 )}
                 {startDate && (
@@ -430,6 +542,7 @@ export default function TransactionsPage() {
                     const isTransfer = row.counterparty && allAccountIds.has(row.counterparty);
                     const type = isTransfer ? 'transfer' : amount > 0 ? 'income' : 'expense';
                     const category = categories.find((c) => c.id === row.categoryId);
+                    const accountDisplay = getAccountDisplay(accounts, row.accountId);
 
                     return (
                       <TableRow
@@ -520,9 +633,12 @@ export default function TransactionsPage() {
                         </TableCell>
                         <TableCell>
                           {row.accountId ? (
-                            <Badge variant='outline' className='text-[9px] font-mono px-1'>
-                              {row.accountId}
-                            </Badge>
+                            <div className='space-y-0.5'>
+                              <Badge variant='outline' className='max-w-[170px] truncate text-[10px] px-1.5 py-0.5'>
+                                {accountDisplay.label}
+                              </Badge>
+                              <div className='text-[10px] text-muted-foreground'>{accountDisplay.secondary}</div>
+                            </div>
                           ) : (
                             '-'
                           )}
@@ -664,9 +780,30 @@ export default function TransactionsPage() {
                     {selectedTx.accountId && (
                       <div>
                         <h4 className='text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5'>
-                          Account ID
+                          Account
                         </h4>
-                        <div className='text-sm font-mono'>{selectedTx.accountId}</div>
+                        <div className='rounded-lg border bg-muted/30 p-3 space-y-3'>
+                          <div>
+                            <div className='text-sm font-semibold'>{selectedAccountDisplay.label}</div>
+                            <div className='text-xs text-muted-foreground font-mono'>{selectedTx.accountId}</div>
+                          </div>
+                          <div className='space-y-2'>
+                            <Label htmlFor='account-label' className='text-[10px] font-bold uppercase tracking-widest text-muted-foreground'>
+                              Label
+                            </Label>
+                            <div className='flex gap-2'>
+                              <Input
+                                id='account-label'
+                                value={accountLabelDraft}
+                                placeholder='e.g. Shared bills'
+                                onChange={(event) => setAccountLabelDraft(event.target.value)}
+                              />
+                              <Button onClick={handleAccountLabelSave} disabled={isSavingAccountLabel}>
+                                {isSavingAccountLabel ? <Loader2 className='w-4 h-4 animate-spin' /> : 'Save'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
 

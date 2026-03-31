@@ -2,6 +2,7 @@
 
 import { useVault } from '@/auth/VaultProvider';
 import { ProtectedVaultContent } from '@/auth/ProtectedVaultContent';
+import { getAccountDisplay } from '@/features/accounts/utils/display';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,8 +43,8 @@ import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
 import { useUser } from '@clerk/nextjs';
 import { CATEGORY_ICON_MAP } from '@/features/categories/utils/icons';
-import { loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
-import { dedupeEncryptedPayloads, encryptResourceItem } from '@/lib/vault/resources';
+import { loadAccounts, loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
+import { dedupeEncryptedPayloads, encryptResourceItem, type AccountItem } from '@/lib/vault/resources';
 import { unwrap } from '@/lib/actions/result';
 
 import {
@@ -72,6 +73,7 @@ export default function CategorizePage() {
   const { isSignedIn } = useUser();
 
   const [transactions, setTransactions] = useState<(TransactionRow & { id: string; uniqueId: string })[]>([]);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [patterns, setPatterns] = useState<PatternItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -111,11 +113,13 @@ export default function CategorizePage() {
     if (!dek) return;
     setIsLoading(true);
     try {
-      const [categoryResult, patternResult, transactionResult] = await Promise.all([
+      const [accountResult, categoryResult, patternResult, transactionResult] = await Promise.all([
+        loadAccounts(dek),
         loadCategories(dek),
         loadPatterns(dek),
         loadTransactions(dek, { uncategorizedOnly: true }),
       ]);
+      setAccounts(accountResult.items as AccountItem[]);
       setCategories(categoryResult.items as CategoryItem[]);
       setPatterns(patternResult.items as PatternItem[]);
       setTransactions(transactionResult.items);
@@ -132,6 +136,7 @@ export default function CategorizePage() {
       loadData();
     } else {
       setIsLoading(false);
+      setAccounts([]);
       setTransactions([]);
       setCategories([]);
       setPatterns([]);
@@ -157,6 +162,7 @@ export default function CategorizePage() {
   const currentTx = transactions[currentIndex];
   const txForDisplay = displayTx || currentTx || null;
   const isTxAnimating = txAnimationPhase !== 'idle';
+  const accountDisplay = useMemo(() => getAccountDisplay(accounts, txForDisplay?.accountId), [accounts, txForDisplay?.accountId]);
 
   useEffect(() => {
     return () => {
@@ -536,18 +542,21 @@ export default function CategorizePage() {
                       </h2>
                       <div className='mx-auto grid w-full max-w-3xl grid-cols-1 gap-2 pt-2 sm:grid-cols-2'>
                         {[
-                          { label: 'Account', value: txForDisplay?.accountId },
+                          txForDisplay?.accountId
+                            ? { label: 'Account', value: accountDisplay.label, secondary: accountDisplay.secondary }
+                            : null,
                           { label: 'Name', value: txForDisplay?.merchantOrName },
                           { label: 'Description', value: txForDisplay?.description },
                           { label: 'Sender', value: txForDisplay?.sender },
                           { label: 'Recipient', value: txForDisplay?.recipient },
                           { label: 'Counterparty', value: txForDisplay?.counterparty },
                         ]
-                          .filter((item) => item.value)
+                          .filter((item): item is { label: string; value: string; secondary?: string } => !!item?.value)
                           .map((item) => (
                             <div key={item.label} className='rounded-xl border bg-muted/30 px-3 py-2 text-left shadow-sm'>
                               <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>{item.label}</p>
                               <p className='truncate text-sm font-medium'>{item.value}</p>
+                              {item.secondary && <p className='truncate text-[11px] text-muted-foreground'>{item.secondary}</p>}
                             </div>
                           ))}
                       </div>

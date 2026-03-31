@@ -1,13 +1,15 @@
 import type { VaultItem } from '@/types/database'
 import { decryptData, encryptData } from '@/crypto/encryption'
 import type { CategoryItem } from '@/features/categories/types'
+import type { AccountPayload } from '@/types/encrypted'
 import type { PatternItem } from '@/features/patterns/types'
 import type { MappingProfile, TransactionRow } from '@/features/upload/types'
 import type { EncryptedPayload } from '@/server/actions/vaultItems'
 
-export type VaultResourceType = 'category' | 'pattern' | 'transaction' | 'mapping_profile'
+export type VaultResourceType = 'category' | 'pattern' | 'transaction' | 'mapping_profile' | 'account'
 
 export type TransactionItem = TransactionRow & { id: string; uniqueId: string }
+export type AccountItem = AccountPayload & { id: string; uniqueId: string }
 
 export type DecryptResult<T> = {
   items: T[]
@@ -86,6 +88,19 @@ export async function decryptResourceItems<T>(
 
 export async function decryptCategories(items: VaultItem[], dek: CryptoKey): Promise<DecryptResult<CategoryItem>> {
   return decryptResourceItems<CategoryItem>(items, dek, () => encodeResourceAAD('category'), (item) => item)
+}
+
+export async function decryptAccounts(items: VaultItem[], dek: CryptoKey): Promise<DecryptResult<AccountItem>> {
+  return decryptResourceItems<AccountItem>(
+    items,
+    dek,
+    () => encodeResourceAAD('account'),
+    (plaintext, item) => ({
+      ...plaintext,
+      id: item.id,
+      uniqueId: item.uniqueId || '',
+    }),
+  )
 }
 
 export async function decryptPatterns(items: VaultItem[], dek: CryptoKey): Promise<DecryptResult<PatternItem>> {

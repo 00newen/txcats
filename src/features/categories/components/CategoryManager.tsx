@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import Link from 'next/link';
 import { CategoryItem } from '../types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-    Plus, Trash2, Pencil, Layers, ChevronDown, GripVertical
+    Plus, Trash2, Pencil, Layers, ChevronDown, GripVertical, Receipt
 } from 'lucide-react';
 import { useVault } from '@/auth/VaultProvider';
 import { useToast } from '@/hooks/use-toast';
@@ -187,6 +188,7 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
         const nextPath = new Set(path);
         nextPath.add(cat.id);
         const parentName = cat.parentId ? categoriesById.get(cat.parentId)?.name : null;
+        const transactionsHref = `/transactions?category=${encodeURIComponent(cat.id)}`;
 
         const isDropTarget = dragOverCategoryId === cat.id && draggingCategoryId !== cat.id;
 
@@ -259,6 +261,17 @@ export function CategoryManager({ categories, onRefresh }: CategoryManagerProps)
                                 <ChevronDown className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-180")} />
                             </Button>
                         )}
+                        <Button
+                            asChild
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all"
+                            title={`View transactions for ${cat.name}`}
+                        >
+                            <Link href={transactionsHref}>
+                                <Receipt className="w-4 h-4" />
+                            </Link>
+                        </Button>
                         <Button
                             variant="ghost"
                             size="icon"

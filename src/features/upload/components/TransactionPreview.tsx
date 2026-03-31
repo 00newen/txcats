@@ -1,5 +1,6 @@
 'use client';
 
+import { getAccountByIdentifier, maskAccountIdentifier } from '@/features/accounts/utils/display';
 import { TransactionRow } from '@/features/upload/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -7,6 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import type { AccountItem } from '@/lib/vault/resources';
 
 import { CategoryItem } from '../../categories/types';
 
@@ -17,12 +21,24 @@ import { useState, useMemo } from 'react';
 interface TransactionPreviewProps {
     data: (TransactionRow & { isDuplicate?: boolean })[];
     categories?: CategoryItem[];
+    existingAccounts?: AccountItem[];
+    accountLabelDrafts?: Record<string, string>;
+    onAccountLabelChange?: (accountId: string, label: string) => void;
     onBack: () => void;
     onReset: () => void;
     onConfirm: () => void;
 }
 
-export function TransactionPreview({ data, categories, onBack, onReset, onConfirm }: TransactionPreviewProps) {
+export function TransactionPreview({
+    data,
+    categories,
+    existingAccounts = [],
+    accountLabelDrafts = {},
+    onAccountLabelChange,
+    onBack,
+    onReset,
+    onConfirm,
+}: TransactionPreviewProps) {
     const [showDuplicates, setShowDuplicates] = useState(false);
     const { amountFormat } = useAmountFormat();
 
@@ -33,6 +49,13 @@ export function TransactionPreview({ data, categories, onBack, onReset, onConfir
     }, [data, showDuplicates]);
 
     const duplicateCount = useMemo(() => data.filter(r => r.isDuplicate).length, [data]);
+    const accountsNeedingLabels = useMemo(
+        () =>
+            Array.from(new Set(data.map((row) => row.accountId?.trim()).filter((accountId): accountId is string => !!accountId))).filter(
+                (accountId) => !getAccountByIdentifier(existingAccounts, accountId)?.name?.trim(),
+            ),
+        [data, existingAccounts],
+    );
 
     // Show only first 50 rows for preview performance
     const previewData = filteredData.slice(0, 50);
@@ -91,6 +114,39 @@ export function TransactionPreview({ data, categories, onBack, onReset, onConfir
                         {showDuplicates ? "Hide Duplicates" : "Show All"}
                     </Button>
                 </div>
+            )}
+
+            {accountsNeedingLabels.length > 0 && (
+                <Card className="border-blue-100 bg-blue-50/60 shadow-sm">
+                    <CardHeader>
+                        <CardTitle className="text-lg font-black">Name these accounts while you import</CardTitle>
+                        <CardDescription>
+                            These account numbers are new in this file. Adding labels now will make them easier to spot later.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {accountsNeedingLabels.map((accountId) => (
+                            <div key={accountId} className="grid gap-2 rounded-xl border border-blue-100 bg-white/80 p-4 md:grid-cols-[minmax(0,1fr)_220px] md:items-end">
+                                <div className="space-y-1">
+                                    <p className="text-xs font-black uppercase tracking-widest text-blue-700">Account Number</p>
+                                    <p className="font-mono text-sm text-slate-700">{maskAccountIdentifier(accountId)}</p>
+                                    <p className="text-xs text-muted-foreground">The full identifier stays in the vault and will still be used for matching.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor={`account-label-${accountId}`} className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                                        Label
+                                    </Label>
+                                    <Input
+                                        id={`account-label-${accountId}`}
+                                        value={accountLabelDrafts[accountId] || ''}
+                                        placeholder="e.g. Shared bills"
+                                        onChange={(event) => onAccountLabelChange?.(accountId, event.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
             )}
 
             <Card className="shadow-2xl border-none">
