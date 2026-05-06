@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { usePrivacyMode } from '@/hooks/use-privacy-mode';
+import { maskAmountText, maskSensitiveText } from '@/lib/privacy';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { AccountItem } from '@/lib/vault/resources';
@@ -41,6 +43,9 @@ export function TransactionPreview({
 }: TransactionPreviewProps) {
     const [showDuplicates, setShowDuplicates] = useState(false);
     const { amountFormat } = useAmountFormat();
+    const { privacyMode } = usePrivacyMode();
+    const displayAmount = (value: string) => (privacyMode ? maskAmountText(value) : value);
+    const displaySensitive = (value: string | null | undefined) => (privacyMode ? maskSensitiveText(value) : value || '');
 
     // Filtered data based on toggle
     const filteredData = useMemo(() => {
@@ -81,13 +86,13 @@ export function TransactionPreview({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card className="bg-green-50/50 border-green-100 shadow-sm">
                     <CardContent className="pt-6">
-                        <div className="text-2xl font-black text-green-700">+${formatAmount(totalIncoming, amountFormat)}</div>
+                        <div className="text-2xl font-black text-green-700">{displayAmount(`+$${formatAmount(totalIncoming, amountFormat)}`)}</div>
                         <p className="text-[10px] text-green-600/80 uppercase font-black tracking-widest">Net Incoming (New Items)</p>
                     </CardContent>
                 </Card>
                 <Card className="bg-red-50/50 border-red-100 shadow-sm">
                     <CardContent className="pt-6">
-                        <div className="text-2xl font-black text-red-700">-${formatAmount(totalOutgoing, amountFormat)}</div>
+                        <div className="text-2xl font-black text-red-700">{displayAmount(`-$${formatAmount(totalOutgoing, amountFormat)}`)}</div>
                         <p className="text-[10px] text-red-600/80 uppercase font-black tracking-widest">Net Outgoing (New Items)</p>
                     </CardContent>
                 </Card>
@@ -204,9 +209,9 @@ export function TransactionPreview({
                                             </TableCell>
                                             <TableCell className="max-w-[300px]">
                                                 <div className="flex flex-col">
-                                                    <span className="font-bold text-sm truncate">{row.merchantOrName}</span>
+                                                    <span className="font-bold text-sm truncate">{displaySensitive(row.merchantOrName)}</span>
                                                     <span className="text-[10px] text-muted-foreground line-clamp-1">
-                                                        {row.description}
+                                                        {displaySensitive(row.description)}
                                                     </span>
                                                 </div>
                                             </TableCell>
@@ -214,7 +219,7 @@ export function TransactionPreview({
                                                 "text-right font-black font-mono text-sm",
                                                 amount < 0 ? 'text-red-500' : 'text-green-600'
                                             )}>
-                                                {isNaN(amount) ? row.amount : `${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`}
+                                                {displayAmount(isNaN(amount) ? row.amount : `${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`)}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge

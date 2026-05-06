@@ -5,6 +5,7 @@ import { useUser } from '@clerk/nextjs';
 import { checkUserSetup } from '@/server/actions/auth';
 import { Loader2 } from 'lucide-react';
 import { UserMeta } from '@/types/database';
+import { useVaultAutoLockSetting } from '@/hooks/use-vault-auto-lock-setting';
 
 // Context to hold the Data Encryption Key (DEK)
 // CAUTION: This key is sensitive and exists in memory only.
@@ -38,6 +39,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const [userMeta, setUserMeta] = useState<UserMeta | null>(null);
     const [vaultId, setVaultId] = useState<string | null>(null);
     const [dek, setDek] = useState<CryptoKey | null>(null);
+    const { autoLockSetting } = useVaultAutoLockSetting();
 
     const refreshSetupState = useCallback(async () => {
         try {
@@ -75,6 +77,35 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const handleUnlock = useCallback((key: CryptoKey) => {
         setDek(key);
     }, []);
+
+    useEffect(() => {
+        if (!dek || autoLockSetting === 'never') return;
+
+        const timeoutMs = autoLockSetting * 60 * 1000;
+        let timeoutId = window.setTimeout(lock, timeoutMs);
+
+        const resetTimer = () => {
+            window.clearTimeout(timeoutId);
+            timeoutId = window.setTimeout(lock, timeoutMs);
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') resetTimer();
+        };
+
+        window.addEventListener('pointerdown', resetTimer);
+        window.addEventListener('keydown', resetTimer);
+        window.addEventListener('scroll', resetTimer, true);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+            window.removeEventListener('pointerdown', resetTimer);
+            window.removeEventListener('keydown', resetTimer);
+            window.removeEventListener('scroll', resetTimer, true);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [autoLockSetting, dek, lock]);
 
     if (!isUserLoaded || !isSetupChecked) {
         return (

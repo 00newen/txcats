@@ -13,8 +13,7 @@ import { Providers } from '@/providers/Providers';
 import { VaultProvider } from '@/auth/VaultProvider';
 import { Toaster } from '@/components/ui/toaster';
 import '@/styles/globals.css';
-import { ThemeToggle } from '@/components/core/ThemeToggle';
-import { AmountFormatSettings } from '@/components/core/AmountFormatSettings';
+import { AppShellActions } from '@/components/core/AppShellActions';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -37,23 +36,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <html lang="en" >
         <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
           <ThemeProvider attribute='class' defaultTheme='system' enableSystem disableTransitionOnChange>
-            <header className="flex justify-end items-center p-4 gap-4 h-16">
-              <SignedOut>
-                <SignInButton />
-                <SignUpButton>
-                  <button className="bg-[#6c47ff] text-white rounded-full font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 cursor-pointer">
-                    Sign Up
-                  </button>
-                </SignUpButton>
-              </SignedOut>
-              <SignedIn>
-                <AmountFormatSettings />
-                <ThemeToggle />
-                <UserButton />
-              </SignedIn>
-            </header>
             <Providers>
               <VaultProvider>
+                <header className="flex h-16 items-center justify-end gap-4 p-4">
+                  <SignedOut>
+                    <SignInButton />
+                    <SignUpButton>
+                      <button className="bg-[#6c47ff] text-white rounded-full font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 cursor-pointer">
+                        Sign Up
+                      </button>
+                    </SignUpButton>
+                  </SignedOut>
+                  <SignedIn>
+                    <AppShellActions />
+                    <UserButton />
+                  </SignedIn>
+                </header>
                 {children}
               </VaultProvider>
             </Providers>

@@ -41,6 +41,8 @@ import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { usePrivacyMode } from '@/hooks/use-privacy-mode';
+import { maskAmountText, maskSensitiveText } from '@/lib/privacy';
 import { useUser } from '@clerk/nextjs';
 import { CATEGORY_ICON_MAP } from '@/features/categories/utils/icons';
 import { loadAccounts, loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
@@ -70,6 +72,7 @@ export default function CategorizePage() {
   const { dek } = useVault();
   const { toast } = useToast();
   const { amountFormat } = useAmountFormat();
+  const { privacyMode } = usePrivacyMode();
   const { isSignedIn } = useUser();
 
   const [transactions, setTransactions] = useState<(TransactionRow & { id: string; uniqueId: string })[]>([]);
@@ -163,6 +166,8 @@ export default function CategorizePage() {
   const txForDisplay = displayTx || currentTx || null;
   const isTxAnimating = txAnimationPhase !== 'idle';
   const accountDisplay = useMemo(() => getAccountDisplay(accounts, txForDisplay?.accountId), [accounts, txForDisplay?.accountId]);
+  const displayAmount = (value: string) => (privacyMode ? maskAmountText(value) : value);
+  const displaySensitive = (value: string | null | undefined) => (privacyMode ? maskSensitiveText(value) : value || '');
 
   useEffect(() => {
     return () => {
@@ -538,7 +543,7 @@ export default function CategorizePage() {
                         {txForDisplay?.bookingDate}
                       </div>
                       <h2 className='text-3xl md:text-4xl font-black leading-tight tracking-tighter'>
-                        {txForDisplay?.merchantOrName || txForDisplay?.description}
+                        {displaySensitive(txForDisplay?.merchantOrName || txForDisplay?.description)}
                       </h2>
                       <div className='mx-auto grid w-full max-w-3xl grid-cols-1 gap-2 pt-2 sm:grid-cols-2'>
                         {[
@@ -555,8 +560,8 @@ export default function CategorizePage() {
                           .map((item) => (
                             <div key={item.label} className='rounded-xl border bg-muted/30 px-3 py-2 text-left shadow-sm'>
                               <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>{item.label}</p>
-                              <p className='truncate text-sm font-medium'>{item.value}</p>
-                              {item.secondary && <p className='truncate text-[11px] text-muted-foreground'>{item.secondary}</p>}
+                              <p className='truncate text-sm font-medium'>{displaySensitive(item.value)}</p>
+                              {item.secondary && <p className='truncate text-[11px] text-muted-foreground'>{displaySensitive(item.secondary)}</p>}
                             </div>
                           ))}
                       </div>
@@ -589,8 +594,8 @@ export default function CategorizePage() {
                       {(() => {
                         if (!txForDisplay) return '';
                         const parsed = parseAmount(txForDisplay.amount);
-                        if (isNaN(parsed)) return txForDisplay.amount;
-                        return `${parsed >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsed), amountFormat)}`;
+                        if (isNaN(parsed)) return displayAmount(txForDisplay.amount);
+                        return displayAmount(`${parsed >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsed), amountFormat)}`);
                       })()}
                     </div>
                   </div>
@@ -1058,16 +1063,16 @@ export default function CategorizePage() {
                         return (
                           <div key={tx.id} className='flex items-center justify-between gap-3 px-4 py-3'>
                             <div className='min-w-0'>
-                              <p className='truncate text-sm font-semibold'>{tx.merchantOrName || tx.description}</p>
+                              <p className='truncate text-sm font-semibold'>{displaySensitive(tx.merchantOrName || tx.description)}</p>
                               <p className='truncate text-[11px] text-muted-foreground'>
                                 {tx.bookingDate}
-                                {tx.merchantOrName ? ` • ${tx.description}` : ''}
+                                {tx.merchantOrName ? ` • ${displaySensitive(tx.description)}` : ''}
                               </p>
                               {(tx.sender || tx.recipient) && (
                                 <p className='truncate text-[11px] text-muted-foreground'>
-                                  {tx.sender ? `Sender: ${tx.sender}` : ''}
+                                  {tx.sender ? `Sender: ${displaySensitive(tx.sender)}` : ''}
                                   {tx.sender && tx.recipient ? ' • ' : ''}
-                                  {tx.recipient ? `Recipient: ${tx.recipient}` : ''}
+                                  {tx.recipient ? `Recipient: ${displaySensitive(tx.recipient)}` : ''}
                                 </p>
                               )}
                             </div>
@@ -1077,7 +1082,7 @@ export default function CategorizePage() {
                                 parsedAmount < 0 ? 'text-red-500' : 'text-green-600',
                               )}
                             >
-                              {formattedAmount}
+                              {displayAmount(formattedAmount)}
                             </span>
                           </div>
                         );
@@ -1117,7 +1122,7 @@ export default function CategorizePage() {
                   return (
                     <div key={`${item.tx.id}-${item.categorizedAt}`} className='flex items-center justify-between gap-3 rounded-lg border px-3 py-2'>
                       <div className='min-w-0'>
-                        <p className='text-sm font-semibold truncate'>{item.tx.merchantOrName || item.tx.description}</p>
+                        <p className='text-sm font-semibold truncate'>{displaySensitive(item.tx.merchantOrName || item.tx.description)}</p>
                         <p className='text-[11px] text-muted-foreground truncate'>{item.tx.bookingDate}</p>
                       </div>
                       <div className='flex items-center gap-2 shrink-0'>
@@ -1130,7 +1135,7 @@ export default function CategorizePage() {
                             parseAmount(item.tx.amount) < 0 ? 'text-red-500' : 'text-green-600',
                           )}
                         >
-                          {formattedAmount}
+                          {displayAmount(formattedAmount)}
                         </span>
                       </div>
                     </div>

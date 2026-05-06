@@ -25,6 +25,8 @@ import { Input } from '@/components/ui/input';
 import { useRef } from 'react';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { usePrivacyMode } from '@/hooks/use-privacy-mode';
+import { maskAmountText, maskSensitiveText } from '@/lib/privacy';
 import { useUser } from '@clerk/nextjs';
 import { loadAccounts, loadCategories, loadPatterns, loadTransactions } from '@/lib/vault/loaders';
 import { dedupeEncryptedPayloads, encryptResourceItem, type AccountItem } from '@/lib/vault/resources';
@@ -38,6 +40,7 @@ export default function TransactionsPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { amountFormat } = useAmountFormat();
+  const { privacyMode } = usePrivacyMode();
   const { isSignedIn } = useUser();
 
   const [data, setData] = useState<(TransactionRow & { id: string; uniqueId: string })[] | null>(null);
@@ -65,6 +68,8 @@ export default function TransactionsPage() {
   // Pagination / Filter states in client for now
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
+  const displayAmount = (value: string) => (privacyMode ? maskAmountText(value) : value);
+  const displaySensitive = (value: string | null | undefined) => (privacyMode ? maskSensitiveText(value) : value || '');
 
   // Load Categories
   const loadCategoryData = useCallback(async () => {
@@ -553,20 +558,20 @@ export default function TransactionsPage() {
                         <TableCell className='font-medium whitespace-nowrap'>{row.bookingDate}</TableCell>
                         <TableCell className='font-bold relative'>
                           <div className='flex items-center gap-2 text-sm'>
-                            <span className='truncate max-w-[150px]'>{row.merchantOrName || '-'}</span>
+                            <span className='truncate max-w-[150px]'>{displaySensitive(row.merchantOrName || '-')}</span>
                             <Info className='w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0' />
                           </div>
                         </TableCell>
                         <TableCell
                           className='max-w-xs truncate text-[10px] text-muted-foreground'
-                          title={row.description}
+                          title={privacyMode ? undefined : row.description}
                         >
-                          {row.description}
+                          {displaySensitive(row.description)}
                         </TableCell>
                         <TableCell
                           className={amount < 0 ? 'text-red-500 font-mono text-sm' : 'text-green-600 font-mono text-sm'}
                         >
-                          {isNaN(amount) ? row.amount : `${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`}
+                          {displayAmount(isNaN(amount) ? row.amount : `${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`)}
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -635,9 +640,9 @@ export default function TransactionsPage() {
                           {row.accountId ? (
                             <div className='space-y-0.5'>
                               <Badge variant='outline' className='max-w-[170px] truncate text-[10px] px-1.5 py-0.5'>
-                                {accountDisplay.label}
+                                {displaySensitive(accountDisplay.label)}
                               </Badge>
-                              <div className='text-[10px] text-muted-foreground'>{accountDisplay.secondary}</div>
+                              <div className='text-[10px] text-muted-foreground'>{displaySensitive(accountDisplay.secondary)}</div>
                             </div>
                           ) : (
                             '-'
@@ -699,7 +704,7 @@ export default function TransactionsPage() {
                 {/* Header Info */}
                 <div className='flex justify-between items-start border-b pb-6'>
                   <div className='space-y-1'>
-                    <h3 className='text-lg font-bold'>{selectedTx.merchantOrName || 'Unnamed Transaction'}</h3>
+                    <h3 className='text-lg font-bold'>{displaySensitive(selectedTx.merchantOrName || 'Unnamed Transaction')}</h3>
                     <p className='text-sm text-muted-foreground font-mono'>{selectedTx.bookingDate}</p>
                   </div>
                   <div
@@ -710,8 +715,8 @@ export default function TransactionsPage() {
                   >
                     {(() => {
                       const parsed = parseAmount(selectedTx.amount);
-                      if (isNaN(parsed)) return selectedTx.amount;
-                      return `${parsed >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsed), amountFormat)}`;
+                      if (isNaN(parsed)) return displayAmount(selectedTx.amount);
+                      return displayAmount(`${parsed >= 0 ? '+' : '-'}$${formatAmount(Math.abs(parsed), amountFormat)}`);
                     })()}
                   </div>
                 </div>
@@ -741,7 +746,7 @@ export default function TransactionsPage() {
                               <div>
                                 <p className='text-[10px] text-muted-foreground uppercase font-bold'>Match String</p>
                                 <p className='font-mono bg-background px-2 py-1 rounded border mt-1'>
-                                  {valueLabel}
+                                  {displaySensitive(valueLabel)}
                                 </p>
                               </div>
                               <div>
@@ -773,7 +778,7 @@ export default function TransactionsPage() {
                         Description / Memo
                       </h4>
                       <div className='text-sm bg-muted/30 p-3 rounded-lg border whitespace-pre-wrap'>
-                        {selectedTx.description}
+                        {displaySensitive(selectedTx.description)}
                       </div>
                     </div>
 
@@ -784,8 +789,8 @@ export default function TransactionsPage() {
                         </h4>
                         <div className='rounded-lg border bg-muted/30 p-3 space-y-3'>
                           <div>
-                            <div className='text-sm font-semibold'>{selectedAccountDisplay.label}</div>
-                            <div className='text-xs text-muted-foreground font-mono'>{selectedTx.accountId}</div>
+                            <div className='text-sm font-semibold'>{displaySensitive(selectedAccountDisplay.label)}</div>
+                            <div className='text-xs text-muted-foreground font-mono'>{displaySensitive(selectedTx.accountId)}</div>
                           </div>
                           <div className='space-y-2'>
                             <Label htmlFor='account-label' className='text-[10px] font-bold uppercase tracking-widest text-muted-foreground'>

@@ -28,10 +28,13 @@ import { startOfMonth, endOfMonth, format, parseISO, startOfYear, endOfYear, sub
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { ThemeToggle } from '@/components/core/ThemeToggle';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { useDashboardDefaultRange } from '@/hooks/use-dashboard-default-range';
+import { usePrivacyMode } from '@/hooks/use-privacy-mode';
+import { maskAmountText, maskSensitiveText } from '@/lib/privacy';
+import { getDashboardDefaultDateRange } from '@/lib/dashboard-range';
 import { loadCategories, loadTransactions } from '@/lib/vault/loaders';
 import {
   buildChartData,
@@ -58,14 +61,28 @@ export default function DashboardPage() {
   const [isLargestTxModalOpen, setIsLargestTxModalOpen] = useState(false);
   const [selectedExpenseCategoryKey, setSelectedExpenseCategoryKey] = useState<string | null>(null);
   const { amountFormat } = useAmountFormat();
+  const { dashboardDefaultRange } = useDashboardDefaultRange();
+  const { privacyMode } = usePrivacyMode();
   const startDateInputRef = useRef<HTMLInputElement>(null);
   const endDateInputRef = useRef<HTMLInputElement>(null);
 
   // Filters
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [isRangeReady, setIsRangeReady] = useState(false);
 
-  // Persistence logic (URL -> local storage fallback)
+  const txDateBounds = useMemo(() => {
+    if (!transactions || transactions.length === 0) return null;
+    const validDates = transactions
+      .map((tx) => tx.bookingDate)
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+
+    if (validDates.length === 0) return null;
+    return { min: validDates[0], max: validDates[validDates.length - 1] };
+  }, [transactions]);
+
+  // URL dates win. Without URL dates, apply the user's default dashboard range.
   useEffect(() => {
     const urlStart = searchParams.get('startDate') || '';
     const urlEnd = searchParams.get('endDate') || '';
@@ -76,22 +93,24 @@ export default function DashboardPage() {
         setStartDate(normalizedRange.startDate);
         setEndDate(normalizedRange.endDate);
       }
+      setIsRangeReady(true);
       return;
     }
 
-    const savedStart = localStorage.getItem('dashboard-start-date');
-    const savedEnd = localStorage.getItem('dashboard-end-date');
-    if (savedStart && savedEnd && isDateOnly(savedStart) && isDateOnly(savedEnd)) {
-      const normalizedRange = normalizeDateRange(savedStart, savedEnd);
+    if (dashboardDefaultRange === 'allTime' && transactions === null) return;
+
+    const defaultRange = getDashboardDefaultDateRange(dashboardDefaultRange, txDateBounds);
+    const normalizedRange = normalizeDateRange(defaultRange.startDate, defaultRange.endDate);
+    if (normalizedRange.startDate !== startDate || normalizedRange.endDate !== endDate) {
       setStartDate(normalizedRange.startDate);
       setEndDate(normalizedRange.endDate);
     }
+    setIsRangeReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [dashboardDefaultRange, searchParams, transactions, txDateBounds]);
 
   useEffect(() => {
-    localStorage.setItem('dashboard-start-date', startDate);
-    localStorage.setItem('dashboard-end-date', endDate);
+    if (!isRangeReady) return;
 
     const currentStart = searchParams.get('startDate') || '';
     const currentEnd = searchParams.get('endDate') || '';
@@ -101,7 +120,7 @@ export default function DashboardPage() {
     params.set('startDate', startDate);
     params.set('endDate', endDate);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [startDate, endDate, pathname, router, searchParams]);
+  }, [endDate, isRangeReady, pathname, router, searchParams, startDate]);
 
   const loadData = useCallback(async () => {
     if (!dek) return;
@@ -282,17 +301,6 @@ export default function DashboardPage() {
     return categories.find((c) => c.id === id)?.name || 'Unknown';
   };
 
-  const txDateBounds = useMemo(() => {
-    if (!transactions || transactions.length === 0) return null;
-    const validDates = transactions
-      .map((tx) => tx.bookingDate)
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort();
-
-    if (validDates.length === 0) return null;
-    return { min: validDates[0], max: validDates[validDates.length - 1] };
-  }, [transactions]);
-
   const clampToBounds = useCallback((date: string, bounds: { min: string; max: string }) => {
     if (date < bounds.min) return bounds.min;
     if (date > bounds.max) return bounds.max;
@@ -370,6 +378,9 @@ export default function DashboardPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
+  const displayAmount = (value: string) => (privacyMode ? maskAmountText(value) : value);
+  const displaySensitive = (value: string | null | undefined) => (privacyMode ? maskSensitiveText(value) : value || '');
+
   const periodTransactionsHref = `/transactions?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
   const largestTxHref =
     periodInsights?.largestTx &&
@@ -400,7 +411,6 @@ export default function DashboardPage() {
               Vault Locked
             </span>
           )}
-          <ThemeToggle />
         </div>
       </div>
 
@@ -458,7 +468,7 @@ export default function DashboardPage() {
                     Total Income
                   </p>
                   <h3 className='text-2xl font-black mt-1 text-green-600'>
-                    +{formatAmount(stats?.totalIncome || 0, amountFormat)}
+                    {displayAmount(`+${formatAmount(stats?.totalIncome || 0, amountFormat)}`)}
                   </h3>
                 </div>
                 <div className='bg-green-100 p-2 rounded-lg text-green-600'>
@@ -476,7 +486,7 @@ export default function DashboardPage() {
                     Total Expenses
                   </p>
                   <h3 className='text-2xl font-black mt-1 text-red-600'>
-                    -{formatAmount(stats?.totalExpenses || 0, amountFormat)}
+                    {displayAmount(`-${formatAmount(stats?.totalExpenses || 0, amountFormat)}`)}
                   </h3>
                 </div>
                 <div className='bg-red-100 p-2 rounded-lg text-red-600'>
@@ -501,7 +511,7 @@ export default function DashboardPage() {
                         Period In
                       </span>
                       <span className='text-sm font-black text-green-600 flex items-center gap-1'>
-                        <TrendingUp className='w-3.5 h-3.5' /> ${formatAmount(stats?.income || 0, amountFormat)}
+                        <TrendingUp className='w-3.5 h-3.5' /> {displayAmount(`$${formatAmount(stats?.income || 0, amountFormat)}`)}
                       </span>
                     </div>
                     <div className='w-px h-6 bg-border mx-1' />
@@ -510,7 +520,7 @@ export default function DashboardPage() {
                         Period Out
                       </span>
                       <span className='text-sm font-black text-red-500 flex items-center gap-1'>
-                        <TrendingDown className='w-3.5 h-3.5' /> ${formatAmount(stats?.expenses || 0, amountFormat)}
+                        <TrendingDown className='w-3.5 h-3.5' /> {displayAmount(`$${formatAmount(stats?.expenses || 0, amountFormat)}`)}
                       </span>
                     </div>
                   </div>
@@ -616,14 +626,14 @@ export default function DashboardPage() {
                     onClick={() => setIsLargestTxModalOpen(true)}
                   >
                     <p className={cn('text-sm font-black mt-1', periodInsights.largestTx.amount >= 0 ? 'text-green-600' : 'text-red-500')}>
-                      {periodInsights.largestTx.amount >= 0 ? '+' : '-'}${formatAmount(
+                      {displayAmount(`${periodInsights.largestTx.amount >= 0 ? '+' : '-'}$${formatAmount(
                         Math.abs(periodInsights.largestTx.amount),
                         amountFormat,
-                      )}
+                      )}`)}
                     </p>
                     <p className='text-[10px] text-muted-foreground truncate'>
                       {periodInsights.largestTx.tx.bookingDate} •{' '}
-                      {periodInsights.largestTx.tx.merchantOrName || periodInsights.largestTx.tx.description || 'Transaction'}
+                      {displaySensitive(periodInsights.largestTx.tx.merchantOrName || periodInsights.largestTx.tx.description || 'Transaction')}
                     </p>
                   </button>
                 ) : (
@@ -635,7 +645,7 @@ export default function DashboardPage() {
                 {periodInsights?.bestInDay ? (
                   <>
                     <p className='text-sm font-black mt-1 text-green-600'>
-                      +${formatAmount(periodInsights.bestInDay.amount, amountFormat)}
+                      {displayAmount(`+$${formatAmount(periodInsights.bestInDay.amount, amountFormat)}`)}
                     </p>
                     <p className='text-[10px] text-muted-foreground'>{periodInsights.bestInDay.date}</p>
                   </>
@@ -648,7 +658,7 @@ export default function DashboardPage() {
                 {periodInsights?.worstOutDay ? (
                   <>
                     <p className='text-sm font-black mt-1 text-red-500'>
-                      -${formatAmount(periodInsights.worstOutDay.amount, amountFormat)}
+                      {displayAmount(`-$${formatAmount(periodInsights.worstOutDay.amount, amountFormat)}`)}
                     </p>
                     <p className='text-[10px] text-muted-foreground'>{periodInsights.worstOutDay.date}</p>
                   </>
@@ -718,7 +728,7 @@ export default function DashboardPage() {
                               <span key={name} className='inline-flex items-center gap-1.5 uppercase tracking-widest opacity-80'>
                                 <span className='inline-block h-2 w-2 rounded-full' style={{ backgroundColor: entry.color }} />
                                 {name}
-                                <span className='opacity-50'>(${formatAmount(amount, amountFormat)})</span>
+                                <span className='opacity-50'>({displayAmount(`$${formatAmount(amount, amountFormat)}`)})</span>
                               </span>
                             );
                           })}
@@ -731,7 +741,7 @@ export default function DashboardPage() {
                             )}
                           >
                             Difference {(stats?.net || 0) >= 0 ? '+' : '-'}$
-                            {formatAmount(Math.abs(stats?.net || 0), amountFormat)}
+                            {displayAmount(`$${formatAmount(Math.abs(stats?.net || 0), amountFormat)}`).replace('$', '')}
                           </span>
                         </div>
                       )}
@@ -809,7 +819,7 @@ export default function DashboardPage() {
                             })}
                           </Pie>
                           <Tooltip
-                            formatter={(value) => `$${formatAmount(Number(value) || 0, amountFormat)}`}
+                            formatter={(value) => displayAmount(`$${formatAmount(Number(value) || 0, amountFormat)}`)}
                             contentStyle={{
                               borderRadius: '12px',
                               border: 'none',
@@ -844,7 +854,7 @@ export default function DashboardPage() {
                                 <span className='truncate font-medium'>{item.name}</span>
                               </span>
                               <span className='font-black whitespace-nowrap'>
-                                ${formatAmount(item.value, amountFormat)} ({pct.toFixed(0)}%)
+                                {displayAmount(`$${formatAmount(item.value, amountFormat)}`)} ({pct.toFixed(0)}%)
                               </span>
                             </button>
                           );
@@ -865,7 +875,7 @@ export default function DashboardPage() {
                       </div>
                       {selectedExpenseCategory && (
                         <p className='text-xs font-black text-red-500'>
-                          -${formatAmount(selectedExpenseCategory.value, amountFormat)}
+                          {displayAmount(`-$${formatAmount(selectedExpenseCategory.value, amountFormat)}`)}
                         </p>
                       )}
                     </div>
@@ -881,14 +891,14 @@ export default function DashboardPage() {
                             <div key={`${tx.uniqueId || tx.bookingDate}-${idx}`} className='px-3 py-2.5 flex items-center justify-between gap-3'>
                               <div className='min-w-0'>
                                 <p className='text-sm font-semibold truncate'>
-                                  {tx.merchantOrName || tx.description || 'Transaction'}
+                                  {displaySensitive(tx.merchantOrName || tx.description || 'Transaction')}
                                 </p>
                                 <p className='text-[10px] text-muted-foreground truncate'>
-                                  {tx.bookingDate} {tx.description ? `• ${tx.description}` : ''}
+                                  {tx.bookingDate} {tx.description ? `• ${displaySensitive(tx.description)}` : ''}
                                 </p>
                               </div>
                               <p className='text-xs font-black text-red-500 whitespace-nowrap'>
-                                -${formatAmount(amount, amountFormat)}
+                                {displayAmount(`-$${formatAmount(amount, amountFormat)}`)}
                               </p>
                             </div>
                           );
@@ -934,7 +944,7 @@ export default function DashboardPage() {
                           {amount > 0 ? <TrendingUp className='w-4 h-4' /> : <TrendingDown className='w-4 h-4' />}
                         </div>
                         <div className='flex-1 min-w-0'>
-                          <p className='text-sm font-bold truncate'>{tx.merchantOrName || tx.description}</p>
+                          <p className='text-sm font-bold truncate'>{displaySensitive(tx.merchantOrName || tx.description)}</p>
                           <div className='flex items-center gap-2'>
                             <p className='text-[10px] font-medium text-muted-foreground'>{tx.bookingDate}</p>
                             <Badge variant='outline' className='text-[8px] h-4 py-0 leading-none'>
@@ -948,7 +958,7 @@ export default function DashboardPage() {
                             amount > 0 ? 'text-green-600' : 'text-red-500',
                           )}
                         >
-                          {amount >= 0 ? '+' : '-'}${formatAmount(Math.abs(amount), amountFormat)}
+                          {displayAmount(`${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`)}
                         </div>
                       </div>
                     );
@@ -1032,12 +1042,11 @@ export default function DashboardPage() {
           {periodInsights?.largestTx && (
             <div className='space-y-4'>
               <div className='rounded-lg border p-3 space-y-2'>
-                <p className='text-sm font-bold'>{periodInsights.largestTx.tx.merchantOrName || 'Unnamed transaction'}</p>
-                <p className='text-xs text-muted-foreground'>{periodInsights.largestTx.tx.description || 'No description'}</p>
+                <p className='text-sm font-bold'>{displaySensitive(periodInsights.largestTx.tx.merchantOrName || 'Unnamed transaction')}</p>
+                <p className='text-xs text-muted-foreground'>{displaySensitive(periodInsights.largestTx.tx.description || 'No description')}</p>
                 <p className='text-xs text-muted-foreground'>Date: {periodInsights.largestTx.tx.bookingDate}</p>
                 <p className={cn('text-lg font-black', periodInsights.largestTx.amount >= 0 ? 'text-green-600' : 'text-red-500')}>
-                  {periodInsights.largestTx.amount >= 0 ? '+' : '-'}$
-                  {formatAmount(Math.abs(periodInsights.largestTx.amount), amountFormat)}
+                  {displayAmount(`${periodInsights.largestTx.amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(periodInsights.largestTx.amount), amountFormat)}`)}
                 </p>
                 <p className='text-xs text-muted-foreground'>
                   Category: {getCategoryName(periodInsights.largestTx.tx.categoryId)}

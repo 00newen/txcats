@@ -34,6 +34,8 @@ import { cn } from '@/lib/utils';
 import { type TransactionRow } from '@/features/upload/types';
 import { formatAmount, parseAmount } from '@/lib/amount';
 import { useAmountFormat } from '@/hooks/use-amount-format';
+import { usePrivacyMode } from '@/hooks/use-privacy-mode';
+import { maskAmountText, maskSensitiveText } from '@/lib/privacy';
 
 interface PatternManagerProps {
   patterns: PatternItem[];
@@ -123,6 +125,7 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
   const { dek } = useVault();
   const { toast } = useToast();
   const { amountFormat } = useAmountFormat();
+  const { privacyMode } = usePrivacyMode();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [matchString, setMatchString] = useState('');
   const [matchSecondaryValue, setMatchSecondaryValue] = useState('');
@@ -145,6 +148,8 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
   const amountOperatorRequiresSecondaryValue = matchType === 'between';
   const isEditAmountField = editMatchField === 'amount';
   const editAmountOperatorRequiresSecondaryValue = editMatchType === 'between';
+  const displayAmount = (value: string) => (privacyMode ? maskAmountText(value) : value);
+  const displaySensitive = (value: string | null | undefined) => (privacyMode ? maskSensitiveText(value) : value || '');
 
   const filteredPatterns = useMemo(() => {
     if (!categoryFilterId) return patterns;
@@ -829,8 +834,8 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
                       <div key={transaction.uniqueId} className='rounded-lg border bg-background p-3'>
                         <div className='flex items-start justify-between gap-3'>
                           <div className='min-w-0'>
-                            <p className='truncate text-sm font-semibold'>{transaction.merchantOrName || transaction.description}</p>
-                            <p className='truncate text-xs text-muted-foreground'>{transaction.description}</p>
+                            <p className='truncate text-sm font-semibold'>{displaySensitive(transaction.merchantOrName || transaction.description)}</p>
+                            <p className='truncate text-xs text-muted-foreground'>{displaySensitive(transaction.description)}</p>
                             <p className='mt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
                               {transaction.bookingDate}
                             </p>
@@ -841,7 +846,7 @@ export function PatternManager({ patterns, categories, onRefresh }: PatternManag
                               amount < 0 ? 'text-red-500' : 'text-green-600',
                             )}
                           >
-                            {isNaN(amount) ? transaction.amount : `${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`}
+                            {displayAmount(isNaN(amount) ? transaction.amount : `${amount >= 0 ? '+' : '-'}$${formatAmount(Math.abs(amount), amountFormat)}`)}
                           </div>
                         </div>
                       </div>
