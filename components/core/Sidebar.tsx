@@ -5,12 +5,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
-  Upload,
   Receipt,
   FolderTree,
   Sparkles,
   Tag,
-  Lock,
   Menu,
   X,
 } from 'lucide-react';
@@ -22,12 +20,10 @@ import { loadTransactions } from '@/lib/vault/loaders';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/upload', label: 'Upload', icon: Upload },
   { href: '/transactions', label: 'Transactions', icon: Receipt },
   { href: '/categories', label: 'Categories', icon: FolderTree },
   { href: '/patterns', label: 'Patterns', icon: Sparkles },
   { href: '/categorize', label: 'Categorize', icon: Tag },
-  { href: '/lock', label: 'Lock', icon: Lock },
 ];
 
 export function Sidebar() {

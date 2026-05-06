@@ -364,6 +364,12 @@ export default function DashboardPage() {
     input.focus();
   };
 
+  const openDrawer = (drawer: 'upload' | 'vault') => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('drawer', drawer);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
   const periodTransactionsHref = `/transactions?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
   const largestTxHref =
     periodInsights?.largestTx &&
@@ -970,7 +976,7 @@ export default function DashboardPage() {
 
         {/* Quick Links */}
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
-          <Link href='/upload' className='group'>
+          <button type='button' onClick={() => openDrawer('upload')} className='group h-full text-left'>
             <Card className='hover:border-primary/50 transition-all hover:shadow-md h-full'>
               <CardContent className='p-6 flex flex-col items-center text-center space-y-2'>
                 <div className='w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform'>
@@ -980,7 +986,7 @@ export default function DashboardPage() {
                 <p className='text-[11px] text-muted-foreground'>Add new statements</p>
               </CardContent>
             </Card>
-          </Link>
+          </button>
           <Link href='/categorize' className='group'>
             <Card className='hover:border-primary/50 transition-all hover:shadow-md h-full'>
               <CardContent className='p-6 flex flex-col items-center text-center space-y-2'>
@@ -1003,7 +1009,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href='/lock' className='group'>
+          <button type='button' onClick={() => openDrawer('vault')} className='group h-full text-left'>
             <Card className='hover:border-primary/50 transition-all hover:shadow-md h-full'>
               <CardContent className='p-6 flex flex-col items-center text-center space-y-2'>
                 <div className='w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform'>
@@ -1013,7 +1019,7 @@ export default function DashboardPage() {
                 <p className='text-[11px] text-muted-foreground'>Secure your session</p>
               </CardContent>
             </Card>
-          </Link>
+          </button>
         </div>
       </ProtectedVaultContent>
 
