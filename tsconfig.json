@@ -17,6 +17,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "baseUrl": ".",
     "plugins": [
       {
         "name": "next"
@@ -25,6 +26,51 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@/auth/*": [
+        "src/components/auth/*"
+      ],
+      "@/components/*": [
+        "components/*"
+      ],
+      "@/crypto/*": [
+        "src/crypto/*"
+      ],
+      "@/db/*": [
+        "src/db/*"
+      ],
+      "@/db": [
+        "src/db/index.ts"
+      ],
+      "@/features/*": [
+        "src/features/*"
+      ],
+      "@/hooks/*": [
+        "hooks/*"
+      ],
+      "@/lib/vault/*": [
+        "src/lib/vault/*"
+      ],
+      "@/lib/actions/*": [
+        "src/lib/actions/*"
+      ],
+      "@/lib/*": [
+        "lib/*"
+      ],
+      "@/lib/auth/*": [
+        "src/lib/auth/*"
+      ],
+      "@/providers/*": [
+        "src/components/providers/*"
+      ],
+      "@/server/*": [
+        "src/server/*"
+      ],
+      "@/styles/*": [
+        "styles/*"
+      ],
+      "@/types/*": [
+        "src/types/*"
       ]
     }
   },

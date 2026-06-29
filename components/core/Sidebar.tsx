@@ -5,31 +5,53 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
-  Upload,
   Receipt,
   FolderTree,
   Sparkles,
   Tag,
-  Lock,
   Menu,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useVault } from '@/auth/VaultProvider';
+import { useEffect, useCallback } from 'react';
+import { loadTransactions } from '@/lib/vault/loaders';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/upload', label: 'Upload', icon: Upload },
   { href: '/transactions', label: 'Transactions', icon: Receipt },
   { href: '/categories', label: 'Categories', icon: FolderTree },
   { href: '/patterns', label: 'Patterns', icon: Sparkles },
   { href: '/categorize', label: 'Categorize', icon: Tag },
-  { href: '/lock', label: 'Lock', icon: Lock },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { dek } = useVault();
   const [isOpen, setIsOpen] = useState(false);
+  const [uncategorizedCount, setUncategorizedCount] = useState<number | null>(null);
+
+  const loadUncategorizedCount = useCallback(async () => {
+    if (!dek) return;
+    try {
+      const result = await loadTransactions(dek, { uncategorizedOnly: true });
+      setUncategorizedCount(result.items.length);
+    } catch (e) {
+      console.error('Failed to load count', e);
+    }
+  }, [dek]);
+
+  useEffect(() => {
+    loadUncategorizedCount();
+  }, [loadUncategorizedCount]);
+
+  // Listen for updates from other pages
+  useEffect(() => {
+    const handleUpdate = () => loadUncategorizedCount();
+    window.addEventListener('tx-count-changed', handleUpdate);
+    return () => window.removeEventListener('tx-count-changed', handleUpdate);
+  }, [loadUncategorizedCount]);
 
   return (
     <>
@@ -83,7 +105,17 @@ export function Sidebar() {
                   )}
                 >
                   <Icon className="h-5 w-5" />
-                  <span>{item.label}</span>
+                  <span className="flex-1">{item.label}</span>
+                  {item.label === 'Categorize' && uncategorizedCount !== null && uncategorizedCount > 0 && (
+                    <span className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-bold",
+                      isActive
+                        ? "bg-primary-foreground text-primary"
+                        : "bg-primary text-primary-foreground"
+                    )}>
+                      {uncategorizedCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -93,4 +125,3 @@ export function Sidebar() {
     </>
   );
 }
-
